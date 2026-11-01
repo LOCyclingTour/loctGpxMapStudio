@@ -1,0 +1,6 @@
+{
+  "name": "LOCT GPX Map Studio",
+  "description": "High-fidelity GPX route visualizer with 3D terrain and camera height control, waypoint photo pins, TV broadcast lower-third overlays, and MP4/WebM video flythrough export.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
