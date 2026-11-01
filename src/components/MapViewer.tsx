@@ -4,6 +4,7 @@ import { WayfarerMap } from '@wayfarer-gl/core';
 import { GpxRouteData, GpxWaypoint } from '../utils/gpxParser';
 import { zoomToAltitude, altitudeToZoom, formatAltitude } from '../utils/cameraMath';
 import { getRoutePointAtProgress, findNearestElevation, angleDelta, interpolateAngle, calculateBearing } from '../utils/routeFollow';
+import { UserButton } from '@clerk/react';
 import { resolveBasemapStyle } from '../utils/basemapStyles';
 import { 
   CinematicIntroOutroConfig, 
@@ -1281,6 +1282,11 @@ export const MapViewer = React.forwardRef<MapViewerHandle, MapViewerProps>(({
       {/* Top Floating Map Controls (Fit to route, 3D Toggle, Camera Altitude, Zoom) */}
       <div className="absolute top-5 right-5 z-20 flex flex-col gap-2 items-end">
         
+        {/* Clerk User Button */}
+        <div className="flex items-center justify-center px-3.5 py-2.5 rounded-xl bg-neutral-900/90 hover:bg-neutral-800 text-white shadow-2xl backdrop-blur-md border border-neutral-700/80 transition-all hover:border-amber-400/70">
+          <UserButton />
+        </div>
+
         {/* Fit to Route Primary Button */}
         <button
           onClick={fitRouteBounds}

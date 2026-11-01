@@ -12,7 +12,6 @@ import { RouteControlsDrawer, BASEMAP_OPTIONS } from './components/RouteControls
 import { VideoExportModal } from './components/VideoExportModal';
 import { TvBannerPartsConfig, DEFAULT_TV_BANNER_PARTS } from './utils/videoExporter';
 import { CinematicIntroOutroConfig, DEFAULT_INTRO_OUTRO_CONFIG } from './utils/cinematicCamera';
-import { Show, SignInButton, SignUpButton, UserButton } from '@clerk/react';
 
 export default function App() {
   const mapViewerRef = useRef<MapViewerHandle | null>(null);
@@ -138,15 +137,6 @@ export default function App() {
 
   return (
     <main className="relative w-screen h-screen overflow-hidden bg-neutral-950 font-sans text-neutral-100">
-      <header className="absolute top-0 left-0 right-0 z-50 flex items-center justify-end gap-2 p-4">
-        <Show when="signed-out">
-          <SignInButton />
-          <SignUpButton />
-        </Show>
-        <Show when="signed-in">
-          <UserButton />
-        </Show>
-      </header>
       {/* 1. Map Container with 3D Terrain & Camera Height (100vh) */}
       <MapViewer
         ref={mapViewerRef}
