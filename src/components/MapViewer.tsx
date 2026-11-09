@@ -32,6 +32,25 @@ import {
   Video,
   Navigation
 } from 'lucide-react';
+import { 
+  WaypointPinSettings, 
+  DEFAULT_WAYPOINT_PIN_SETTINGS, 
+  computeWaypointsRouteProgress, 
+  getWaypointApproachStatus 
+} from '../utils/waypointSettings';
+
+function escapeHtml(str: string): string {
+  return str.replace(/[&<>"']/g, (m) => {
+    switch (m) {
+      case '&': return '&amp;';
+      case '<': return '&lt;';
+      case '>': return '&gt;';
+      case '"': return '&quot;';
+      case "'": return '&#039;';
+      default: return m;
+    }
+  });
+}
 
 export interface LineStyleSettings {
   color: string;
@@ -71,6 +90,8 @@ interface MapViewerProps {
   basemapStyle: string;
   cameraSettings: CameraSettings;
   cinematicIntroOutro?: CinematicIntroOutroConfig;
+  waypointPinSettings?: WaypointPinSettings;
+  flythroughDurationSeconds?: number;
   onCameraChange?: (settings: Partial<CameraSettings>) => void;
   onSelectWaypoint?: (wpt: GpxWaypoint) => void;
   onUpdateWaypointPhoto?: (wptId: string, photoUrl: string) => void;
@@ -85,6 +106,8 @@ export const MapViewer = React.forwardRef<MapViewerHandle, MapViewerProps>(({
   basemapStyle,
   cameraSettings,
   cinematicIntroOutro,
+  waypointPinSettings,
+  flythroughDurationSeconds,
   onCameraChange,
   onSelectWaypoint,
   onUpdateWaypointPhoto,
@@ -99,9 +122,16 @@ export const MapViewer = React.forwardRef<MapViewerHandle, MapViewerProps>(({
   const isInternalCameraUpdate = useRef<boolean>(false);
   const routeDataRef = useRef<GpxRouteData | null>(routeData);
 
+  const pinSettings = waypointPinSettings || DEFAULT_WAYPOINT_PIN_SETTINGS;
+  const pinSettingsRef = useRef<WaypointPinSettings>(pinSettings);
+
   useEffect(() => {
     routeDataRef.current = routeData;
   }, [routeData]);
+
+  useEffect(() => {
+    pinSettingsRef.current = waypointPinSettings || DEFAULT_WAYPOINT_PIN_SETTINGS;
+  }, [waypointPinSettings]);
   
   // Animation & Camera follow state
   const [isPlaying, setIsPlaying] = useState(false);
@@ -327,6 +357,39 @@ export const MapViewer = React.forwardRef<MapViewerHandle, MapViewerProps>(({
     }
   }, [initTravelerLayers]);
 
+  // Dynamically update waypoint pin reveal and arrival pulse as route progresses
+  const updateWaypointApproach = useCallback((progress: number) => {
+    const settings = pinSettingsRef.current;
+    if (!settings || !routeDataRef.current) return;
+    const totalDist = routeDataRef.current.totalDistanceKm;
+    const approachDist = settings.approachDistanceKm ?? 0.8;
+    const stayVisible = settings.stayVisibleAfterArrival ?? true;
+    const isApproachEnabled = Boolean(settings.approachReveal);
+
+    markersRef.current.forEach((marker) => {
+      const el = marker.getElement();
+      if (!el) return;
+      if (!isApproachEnabled) {
+        el.classList.remove('is-approach-mode', 'is-active-arrival');
+        el.classList.add('is-revealed');
+        return;
+      }
+      el.classList.add('is-approach-mode');
+      const wptDist = parseFloat(el.dataset.wptDist || '0');
+      const status = getWaypointApproachStatus(progress, wptDist, totalDist, approachDist, stayVisible);
+      if (status.isRevealed) {
+        el.classList.add('is-revealed');
+      } else {
+        el.classList.remove('is-revealed');
+      }
+      if (status.isActiveArrival) {
+        el.classList.add('is-active-arrival');
+      } else {
+        el.classList.remove('is-active-arrival');
+      }
+    });
+  }, []);
+
   // Synchronize map camera and traveler marker with current route progress
   const moveCameraToRouteProgress = useCallback((
     progress: number, 
@@ -340,6 +403,9 @@ export const MapViewer = React.forwardRef<MapViewerHandle, MapViewerProps>(({
 
     // 1. Position active traveler beacon with 3D elevation
     renderTravelerMarker(pointInfo.lng, pointInfo.lat, pointInfo.ele);
+
+    // 2. Animate waypoint pins on approach
+    updateWaypointApproach(progress);
 
     const activeMode = modeOverride ?? followMode;
 
@@ -477,6 +543,8 @@ export const MapViewer = React.forwardRef<MapViewerHandle, MapViewerProps>(({
       setPlaybackProgress(computedOverall);
       if (shouldMoveCamera) {
         moveCameraToRouteProgress(computedOverall);
+      } else {
+        updateWaypointApproach(computedOverall);
       }
     },
     moveCameraToProgress: (progress: number, snapImmediately?: boolean, modeOverride?: FollowCamMode) => {
@@ -557,29 +625,97 @@ export const MapViewer = React.forwardRef<MapViewerHandle, MapViewerProps>(({
 
     cleanupMarkers();
 
+    const wptProgressMap = computeWaypointsRouteProgress(routeData);
+    const pinSize = pinSettings.pinSize || 'medium';
+    const displayMode = pinSettings.displayMode || 'name';
+    const pinStyle = pinSettings.pinStyle || (displayMode === 'name' ? 'badge' : 'classic');
+    const isApproach = Boolean(pinSettings.approachReveal);
+
     routeData.waypoints.forEach((wpt, index) => {
+      const distInfo = wptProgressMap.get(wpt.id) || { distFromStartKm: 0, progressRatio: 0 };
       const pinEl = document.createElement('div');
-      pinEl.className = 'custom-wpt-marker-wrap';
+
+      const initialStatus = isApproach
+        ? getWaypointApproachStatus(
+            playbackProgress,
+            distInfo.distFromStartKm,
+            routeData.totalDistanceKm,
+            pinSettings.approachDistanceKm ?? 0.8,
+            pinSettings.stayVisibleAfterArrival ?? true
+          )
+        : { isRevealed: true, isActiveArrival: false, distanceToWaypointKm: 0 };
+
+      const approachClasses = isApproach
+        ? `is-approach-mode ${initialStatus.isRevealed ? 'is-revealed' : ''} ${initialStatus.isActiveArrival ? 'is-active-arrival' : ''}`
+        : 'is-revealed';
+
+      pinEl.className = `custom-wpt-marker-wrap size-${pinSize} mode-${displayMode} ${approachClasses}`.trim();
       pinEl.setAttribute('role', 'button');
       pinEl.setAttribute('tabindex', '0');
       pinEl.setAttribute('aria-label', `Waypoint ${index + 1}: ${wpt.name}`);
+      pinEl.dataset.wptId = wpt.id;
+      pinEl.dataset.wptDist = String(distInfo.distFromStartKm);
+      pinEl.dataset.wptProgress = String(distInfo.progressRatio);
 
       const hasPhoto = Boolean(wpt.imageUrl);
+      const safeName = escapeHtml(wpt.name);
+      const eleTag = (pinSettings.showElevation && wpt.ele !== undefined)
+        ? `<span class="wpt-pill-ele">▲ ${wpt.ele}m</span>`
+        : '';
 
-      pinEl.innerHTML = `
-        <div class="custom-wpt-pin ${hasPhoto ? 'has-photo' : ''}">
-          <div class="pin-inner" style="border-color: ${lineStyle.color}">
-            ${
-              hasPhoto
-                ? `<img src="${wpt.imageUrl}" alt="${wpt.name}" class="pin-thumb" />`
-                : `<span class="pin-index">${index + 1}</span>`
-            }
+      if (displayMode === 'name' || pinStyle === 'badge') {
+        const photoIcon = hasPhoto
+          ? `<img src="${wpt.imageUrl}" alt="${safeName}" class="w-4 h-4 rounded-full object-cover flex-shrink-0" />`
+          : `<svg class="wpt-pill-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>`;
+
+        pinEl.innerHTML = `
+          <div class="wpt-badge-pill" style="border-color: ${lineStyle.color}">
+            ${photoIcon}
+            <span class="wpt-pill-name">${safeName}</span>
+            ${eleTag}
           </div>
-          <div class="pin-pulse" style="background-color: ${lineStyle.color}"></div>
           <div class="pin-arrow" style="border-top-color: ${lineStyle.color}"></div>
           <div class="pin-ground-dot" style="background-color: ${lineStyle.color}"></div>
-        </div>
-      `;
+        `;
+      } else if (displayMode === 'both') {
+        const calloutEle = (pinSettings.showElevation && wpt.ele !== undefined)
+          ? ` <span style="color:#fbbf24; font-size:10px; margin-left:3px;">▲${wpt.ele}m</span>`
+          : '';
+
+        pinEl.innerHTML = `
+          <div class="wpt-name-callout" style="border-color: ${lineStyle.color}">
+            ${safeName}${calloutEle}
+          </div>
+          <div class="custom-wpt-pin ${hasPhoto ? 'has-photo' : ''} style-${pinStyle}">
+            <div class="pin-inner" style="border-color: ${lineStyle.color}">
+              ${
+                hasPhoto
+                  ? `<img src="${wpt.imageUrl}" alt="${safeName}" class="pin-thumb" />`
+                  : `<span class="pin-index">${index + 1}</span>`
+              }
+            </div>
+            <div class="pin-pulse" style="background-color: ${lineStyle.color}"></div>
+            <div class="pin-arrow" style="border-top-color: ${lineStyle.color}"></div>
+            <div class="pin-ground-dot" style="background-color: ${lineStyle.color}"></div>
+          </div>
+        `;
+      } else {
+        // displayMode === 'index'
+        pinEl.innerHTML = `
+          <div class="custom-wpt-pin ${hasPhoto ? 'has-photo' : ''} style-${pinStyle}">
+            <div class="pin-inner" style="border-color: ${lineStyle.color}">
+              ${
+                hasPhoto
+                  ? `<img src="${wpt.imageUrl}" alt="${safeName}" class="pin-thumb" />`
+                  : `<span class="pin-index">${index + 1}</span>`
+              }
+            </div>
+            <div class="pin-pulse" style="background-color: ${lineStyle.color}"></div>
+            <div class="pin-arrow" style="border-top-color: ${lineStyle.color}"></div>
+            <div class="pin-ground-dot" style="background-color: ${lineStyle.color}"></div>
+          </div>
+        `;
+      }
 
       const popupCard = document.createElement('div');
       popupCard.className = 'broadcast-popup-content';
@@ -587,7 +723,7 @@ export const MapViewer = React.forwardRef<MapViewerHandle, MapViewerProps>(({
       const photoHtml = wpt.imageUrl
         ? `
           <div class="popup-photo-container">
-            <img src="${wpt.imageUrl}" alt="${wpt.name}" class="popup-img" />
+            <img src="${wpt.imageUrl}" alt="${safeName}" class="popup-img" />
             <div class="popup-badge">WAYPOINT #${index + 1}</div>
           </div>
         `
@@ -597,20 +733,20 @@ export const MapViewer = React.forwardRef<MapViewerHandle, MapViewerProps>(({
           </div>
         `;
 
-      const eleHtml = wpt.ele !== undefined
+      const popupEleHtml = wpt.ele !== undefined
         ? `<div class="popup-stat-tag">▲ ${wpt.ele}m ELEVATION</div>`
         : '';
 
       const descHtml = wpt.desc || wpt.cmt
-        ? `<p class="popup-desc">${wpt.desc || wpt.cmt}</p>`
+        ? `<p class="popup-desc">${escapeHtml(wpt.desc || wpt.cmt || '')}</p>`
         : '<p class="popup-desc italic opacity-60">Scenic route checkpoint</p>';
 
       popupCard.innerHTML = `
         ${photoHtml}
         <div class="popup-body">
-          <h3 class="popup-title">${wpt.name}</h3>
+          <h3 class="popup-title">${safeName}</h3>
           <div class="popup-meta">
-            ${eleHtml}
+            ${popupEleHtml}
             <span class="popup-coords">${wpt.lat.toFixed(4)}°, ${wpt.lng.toFixed(4)}°</span>
           </div>
           ${descHtml}
@@ -668,7 +804,7 @@ export const MapViewer = React.forwardRef<MapViewerHandle, MapViewerProps>(({
 
       markersRef.current.push(marker);
     });
-  }, [routeData, lineStyle.color, cleanupMarkers, onSelectWaypoint, onUpdateWaypointPhoto]);
+  }, [routeData, lineStyle.color, pinSettings, playbackProgress, cleanupMarkers, onSelectWaypoint, onUpdateWaypointPhoto]);
 
   // Setup Camera Listeners to report live Altitude, Pitch, Bearing to parent
   const attachCameraListeners = useCallback((map: maplibregl.Map) => {
@@ -1005,7 +1141,7 @@ export const MapViewer = React.forwardRef<MapViewerHandle, MapViewerProps>(({
     };
 
     const hasIntroOrOutro = cfg.introEnabled || cfg.outroEnabled;
-    const baseFlythroughSeconds = 24;
+    const baseFlythroughSeconds = Math.max(3, flythroughDurationSeconds ?? 24);
     const totalDurationSeconds = hasIntroOrOutro
       ? calculateTotalSequenceDuration(baseFlythroughSeconds, cfg)
       : baseFlythroughSeconds;
@@ -1208,6 +1344,7 @@ export const MapViewer = React.forwardRef<MapViewerHandle, MapViewerProps>(({
     getBoundsCamera,
     renderTravelerMarker,
     setLineColorOverride,
+    flythroughDurationSeconds,
   ]);
 
   const handleManualScrub = (newProgress: number) => {
@@ -1281,12 +1418,12 @@ export const MapViewer = React.forwardRef<MapViewerHandle, MapViewerProps>(({
 
       {/* Top Floating Map Controls (Fit to route, 3D Toggle, Camera Altitude, Zoom) */}
       <div className="absolute top-5 right-5 z-20 flex flex-col gap-2 items-end">
-        
+                
         {/* Clerk User Button */}
         <div className="flex items-center justify-center px-3.5 py-2.5 rounded-xl bg-neutral-900/90 hover:bg-neutral-800 text-white shadow-2xl backdrop-blur-md border border-neutral-700/80 transition-all hover:border-amber-400/70">
           <UserButton />
         </div>
-
+        
         {/* Fit to Route Primary Button */}
         <button
           onClick={fitRouteBounds}

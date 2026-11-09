@@ -37,6 +37,12 @@ interface TvBroadcastOverlayProps {
   onBannerPartsChange?: (parts: TvBannerPartsConfig) => void;
   stageName?: string;
   onStageNameChange?: (name: string) => void;
+  customTitle?: string;
+  onCustomTitleChange?: (title: string) => void;
+  customSubtitle?: string;
+  onCustomSubtitleChange?: (subtitle: string) => void;
+  customDuration?: string;
+  onCustomDurationChange?: (duration: string) => void;
 }
 
 export const TvBroadcastOverlay: React.FC<TvBroadcastOverlayProps> = ({
@@ -56,12 +62,40 @@ export const TvBroadcastOverlay: React.FC<TvBroadcastOverlayProps> = ({
   onBannerPartsChange,
   stageName,
   onStageNameChange,
+  customTitle,
+  onCustomTitleChange,
+  customSubtitle,
+  onCustomSubtitleChange,
+  customDuration,
+  onCustomDurationChange,
 }) => {
   const [isMinimized, setIsMinimized] = useState(false);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [isCustomizingParts, setIsCustomizingParts] = useState(false);
-  const [customTitle, setCustomTitle] = useState('');
-  const [customSubtitle, setCustomSubtitle] = useState('');
+
+  // Editable Title, Subtitle, and Duration state (controlled or local fallback)
+  const [localTitle, setLocalTitle] = useState('');
+  const [localSubtitle, setLocalSubtitle] = useState('');
+  const [localDuration, setLocalDuration] = useState('');
+
+  const currentTitle = customTitle !== undefined ? customTitle : localTitle;
+  const currentSubtitle = customSubtitle !== undefined ? customSubtitle : localSubtitle;
+  const currentDuration = customDuration !== undefined ? customDuration : localDuration;
+
+  const handleUpdateTitle = (val: string) => {
+    if (onCustomTitleChange) onCustomTitleChange(val);
+    else setLocalTitle(val);
+  };
+
+  const handleUpdateSubtitle = (val: string) => {
+    if (onCustomSubtitleChange) onCustomSubtitleChange(val);
+    else setLocalSubtitle(val);
+  };
+
+  const handleUpdateDuration = (val: string) => {
+    if (onCustomDurationChange) onCustomDurationChange(val);
+    else setLocalDuration(val);
+  };
 
   // Editable Stage Name state
   const [localStageName, setLocalStageName] = useState('LOCT GPX STAGE');
@@ -116,12 +150,10 @@ export const TvBroadcastOverlay: React.FC<TvBroadcastOverlayProps> = ({
 
   if (!routeData) return null;
 
-  const displayTitle = customTitle || routeData.name || 'ROUTE OVERVIEW';
-  const autoSubtitle = `${routeData.totalDistanceKm} KM (${routeData.totalDistanceMiles} MI) • ${
-    routeData.formattedDuration ? `${routeData.formattedDuration} • ` : ''
-  }${routeData.waypoints.length} WAYPOINTS • +${routeData.elevationGainM}M ELEVATION`;
-
-  const displaySubtitle = customSubtitle || autoSubtitle;
+  const displayTitle = currentTitle || routeData.name || 'ROUTE OVERVIEW';
+  const displayDuration = currentDuration || routeData.formattedDuration || '2h 15m';
+  const autoSubtitle = `${routeData.totalDistanceKm} KM (${routeData.totalDistanceMiles} MI) • ${displayDuration} • +${routeData.elevationGainM}M ELEVATION`;
+  const displaySubtitle = currentSubtitle || autoSubtitle;
 
   const leftOffsetClass = isDrawerOpen ? 'bottom-6 left-6 md:left-[404px] items-start' : 'bottom-6 left-6 items-start';
 
@@ -364,9 +396,9 @@ export const TvBroadcastOverlay: React.FC<TvBroadcastOverlayProps> = ({
               <input
                 id="overlay-custom-title"
                 type="text"
-                value={customTitle}
-                placeholder={routeData.name}
-                onChange={(e) => setCustomTitle(e.target.value)}
+                value={currentTitle}
+                placeholder={routeData.name || 'ROUTE OVERVIEW'}
+                onChange={(e) => handleUpdateTitle(e.target.value)}
                 className="flex-1 bg-neutral-950 border border-neutral-700 rounded px-2 py-1 text-neutral-100 text-xs focus:outline-none focus:border-amber-400 font-mono"
               />
             </div>
@@ -375,19 +407,48 @@ export const TvBroadcastOverlay: React.FC<TvBroadcastOverlayProps> = ({
               <input
                 id="overlay-custom-sub"
                 type="text"
-                value={customSubtitle}
+                value={currentSubtitle}
                 placeholder={autoSubtitle}
-                onChange={(e) => setCustomSubtitle(e.target.value)}
+                onChange={(e) => handleUpdateSubtitle(e.target.value)}
                 className="flex-1 bg-neutral-950 border border-neutral-700 rounded px-2 py-1 text-neutral-100 text-xs focus:outline-none focus:border-amber-400 font-mono"
               />
+            </div>
+            <div className="flex gap-2 items-center">
+              <label htmlFor="overlay-custom-duration" className="text-neutral-400 font-mono text-[10px] uppercase w-16">Duration:</label>
+              <input
+                id="overlay-custom-duration"
+                type="text"
+                value={currentDuration}
+                placeholder={routeData.formattedDuration || '2h 15m'}
+                onChange={(e) => handleUpdateDuration(e.target.value)}
+                className="flex-1 bg-neutral-950 border border-neutral-700 rounded px-2 py-1 text-neutral-100 text-xs focus:outline-none focus:border-amber-400 font-mono"
+              />
+            </div>
+            <div className="flex items-center gap-1.5 pl-18 flex-wrap">
+              <span className="text-[9px] text-neutral-500 font-mono uppercase">Presets:</span>
+              {['1h 30m', '2h 15m', '3h 45m', '4h 30m', '5h 00m'].map((preset) => (
+                <button
+                  key={preset}
+                  type="button"
+                  onClick={() => handleUpdateDuration(preset)}
+                  className={`px-1.5 py-0.5 rounded text-[9px] font-mono uppercase transition-colors cursor-pointer ${
+                    currentDuration === preset 
+                      ? 'bg-amber-500 text-black font-bold' 
+                      : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-300'
+                  }`}
+                >
+                  {preset}
+                </button>
+              ))}
             </div>
             <div className="flex justify-end gap-2 pt-1 border-t border-neutral-800">
               <button
                 type="button"
                 onClick={() => {
                   handleUpdateStageName('LOCT GPX STAGE');
-                  setCustomTitle('');
-                  setCustomSubtitle('');
+                  handleUpdateTitle('');
+                  handleUpdateSubtitle('');
+                  handleUpdateDuration('');
                 }}
                 className="px-2 py-0.5 rounded text-[10px] text-neutral-400 hover:text-white cursor-pointer"
               >
@@ -499,7 +560,7 @@ export const TvBroadcastOverlay: React.FC<TvBroadcastOverlayProps> = ({
               </div>
             )}
 
-            {/* Telemetry Strip (Distance, Elev, Waypoints) */}
+            {/* Telemetry Strip (Distance, Elev Gain, Duration, Peak Elev) */}
             {activeParts.showTelemetry && (
               <div className="mt-2.5 grid grid-cols-4 gap-2 pt-2 border-t border-neutral-800/90 text-neutral-300 font-mono text-[11px]">
                 
@@ -520,14 +581,14 @@ export const TvBroadcastOverlay: React.FC<TvBroadcastOverlayProps> = ({
                 <div className="flex flex-col">
                   <span className="text-[9px] uppercase tracking-wider text-neutral-400">DURATION</span>
                   <span className="font-bold text-neutral-100 text-xs sm:text-sm">
-                    {routeData.formattedDuration || '2h 15m'}
+                    {displayDuration}
                   </span>
                 </div>
 
                 <div className="flex flex-col">
-                  <span className="text-[9px] uppercase tracking-wider text-neutral-400">POINTS / WP</span>
+                  <span className="text-[9px] uppercase tracking-wider text-neutral-400">PEAK ELEV</span>
                   <span className="font-bold text-cyan-400 text-xs sm:text-sm">
-                    {routeData.waypoints.length} <span className="text-[10px] font-normal text-neutral-400">pins</span>
+                    {routeData.maxElevationM} <span className="text-[10px] font-normal text-neutral-400">m</span>
                   </span>
                 </div>
 

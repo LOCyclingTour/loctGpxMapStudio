@@ -6,7 +6,7 @@
   cursor: pointer;
   position: relative;
   outline: none;
-  width: 38px;
+  width: auto;
   height: auto;
   display: flex;
   flex-direction: column;
@@ -16,6 +16,141 @@
   user-select: none;
   z-index: 25;
   transform-origin: bottom center;
+  transition: opacity 0.35s cubic-bezier(0.16, 1, 0.3, 1), transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Approach Reveal Mode */
+.custom-wpt-marker-wrap.is-approach-mode {
+  opacity: 0;
+  transform: translateY(8px) scale(0.7);
+  pointer-events: none;
+}
+
+.custom-wpt-marker-wrap.is-approach-mode.is-revealed {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  pointer-events: auto;
+}
+
+/* Arrival highlight pulse when route reaches the waypoint */
+.custom-wpt-marker-wrap.is-active-arrival .wpt-badge-pill,
+.custom-wpt-marker-wrap.is-active-arrival .pin-inner {
+  border-color: #fbbf24 !important;
+  box-shadow: 0 0 0 4px rgba(251, 191, 36, 0.4), 0 8px 24px rgba(0, 0, 0, 0.7) !important;
+  animation: arrival-bounce 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+@keyframes arrival-bounce {
+  0% { transform: scale(0.92); }
+  50% { transform: scale(1.15); }
+  100% { transform: scale(1); }
+}
+
+/* Size Variants */
+.custom-wpt-marker-wrap.size-small {
+  transform-origin: bottom center;
+}
+.custom-wpt-marker-wrap.size-small .pin-inner {
+  width: 26px;
+  height: 26px;
+}
+.custom-wpt-marker-wrap.size-small .pin-index {
+  font-size: 9.5px;
+}
+.custom-wpt-marker-wrap.size-small .wpt-badge-pill {
+  padding: 3px 8px;
+  font-size: 11px;
+}
+
+.custom-wpt-marker-wrap.size-large .pin-inner {
+  width: 38px;
+  height: 38px;
+}
+.custom-wpt-marker-wrap.size-large .pin-index {
+  font-size: 13px;
+}
+.custom-wpt-marker-wrap.size-large .wpt-badge-pill {
+  padding: 6px 14px;
+  font-size: 13px;
+}
+
+/* Badge Pill (Name Display Mode) */
+.wpt-badge-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(13, 15, 20, 0.94);
+  border: 1.5px solid #f59e0b;
+  border-radius: 9999px;
+  padding: 4px 10px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  color: #f9fafb;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.7), 0 0 12px rgba(245, 158, 11, 0.25);
+  backdrop-filter: blur(8px);
+  white-space: nowrap;
+  max-width: 260px;
+  transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275), border-color 0.2s;
+  z-index: 2;
+}
+
+.wpt-badge-pill:hover {
+  transform: translateY(-2px) scale(1.04);
+  border-color: #fcd34d;
+}
+
+.wpt-badge-pill .wpt-pill-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  color: #f59e0b;
+}
+
+.wpt-badge-pill .wpt-pill-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  letter-spacing: -0.01em;
+}
+
+.wpt-badge-pill .wpt-pill-ele {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  font-weight: 600;
+  color: #fbbf24;
+  background: rgba(245, 158, 11, 0.16);
+  padding: 1px 5px;
+  border-radius: 9999px;
+  margin-left: 2px;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.wpt-badge-pill .wpt-pill-idx {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  font-weight: 700;
+  color: #94a3b8;
+  margin-right: -2px;
+}
+
+/* Callout Label above Classic Pin */
+.wpt-name-callout {
+  background: rgba(10, 10, 10, 0.92);
+  border: 1px solid rgba(245, 158, 11, 0.6);
+  border-radius: 6px;
+  padding: 2px 7px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #ffffff;
+  white-space: nowrap;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.6);
+  margin-bottom: 3px;
+  backdrop-filter: blur(6px);
+  pointer-events: none;
 }
 
 .custom-wpt-pin {
@@ -23,7 +158,8 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  width: 38px;
+  width: auto;
+  min-width: 32px;
   height: auto;
   transform-origin: bottom center;
   transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
@@ -46,6 +182,17 @@
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.6), 0 0 12px rgba(245, 158, 11, 0.3);
   overflow: hidden;
   z-index: 2;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+/* Minimal Pin style */
+.custom-wpt-pin.style-minimal .pin-inner {
+  width: 14px;
+  height: 14px;
+  border-width: 2px;
+  border-color: #f59e0b;
+  background: #ffffff;
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.7);
 }
 
 .custom-wpt-pin.has-photo .pin-inner {

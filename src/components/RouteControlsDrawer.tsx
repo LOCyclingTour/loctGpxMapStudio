@@ -28,9 +28,11 @@ import {
   RotateCw,
   Film,
   CheckSquare,
-  Square
+  Square,
+  Tag
 } from 'lucide-react';
 import { TvBannerPartsConfig, DEFAULT_TV_BANNER_PARTS } from '../utils/videoExporter';
+import { WaypointPinSettings, DEFAULT_WAYPOINT_PIN_SETTINGS } from '../utils/waypointSettings';
 
 interface RouteControlsDrawerProps {
   routeData: GpxRouteData | null;
@@ -61,6 +63,16 @@ interface RouteControlsDrawerProps {
   onTvBannerPartsChange?: (parts: TvBannerPartsConfig) => void;
   stageName?: string;
   onStageNameChange?: (name: string) => void;
+  waypointPinSettings?: WaypointPinSettings;
+  onUpdateWaypointPinSettings?: (settings: WaypointPinSettings) => void;
+  customTitle?: string;
+  onCustomTitleChange?: (title: string) => void;
+  customSubtitle?: string;
+  onCustomSubtitleChange?: (subtitle: string) => void;
+  customDuration?: string;
+  onCustomDurationChange?: (duration: string) => void;
+  flythroughDurationSeconds?: number;
+  onFlythroughDurationSecondsChange?: (seconds: number) => void;
 }
 
 import {
@@ -115,11 +127,34 @@ export const RouteControlsDrawer: React.FC<RouteControlsDrawerProps> = ({
   onTvBannerPartsChange,
   stageName,
   onStageNameChange,
+  waypointPinSettings,
+  onUpdateWaypointPinSettings,
+  customTitle,
+  onCustomTitleChange,
+  customSubtitle,
+  onCustomSubtitleChange,
+  customDuration,
+  onCustomDurationChange,
+  flythroughDurationSeconds = 24,
+  onFlythroughDurationSecondsChange,
 }) => {
   const [activeTab, setActiveTab] = useState<'routes' | 'style' | '3d' | 'waypoints' | 'profile' | 'tv'>('routes');
   const [isDragging, setIsDragging] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Fallback waypoint pin settings if not controlled from parent
+  const [localPinSettings, setLocalPinSettings] = useState<WaypointPinSettings>(DEFAULT_WAYPOINT_PIN_SETTINGS);
+  const currentPinSettings = waypointPinSettings || localPinSettings;
+
+  const handleUpdatePinSettings = (patch: Partial<WaypointPinSettings>) => {
+    const next = { ...currentPinSettings, ...patch };
+    if (onUpdateWaypointPinSettings) {
+      onUpdateWaypointPinSettings(next);
+    } else {
+      setLocalPinSettings(next);
+    }
+  };
 
   // Fallback banner parts if not controlled from parent
   const [localParts, setLocalParts] = useState<TvBannerPartsConfig>(DEFAULT_TV_BANNER_PARTS);
@@ -811,10 +846,181 @@ export const RouteControlsDrawer: React.FC<RouteControlsDrawerProps> = ({
 
           {/* TAB 4: WAYPOINTS & PHOTOS */}
           {activeTab === 'waypoints' && (
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
+            <div className="space-y-4">
+              {/* WAYPOINT PIN CONFIGURATION CARD */}
+              <div className="p-3.5 rounded-xl bg-neutral-900/80 border border-neutral-800 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <MapPin className="w-3.5 h-3.5 text-amber-400" />
+                    <span className="font-mono uppercase font-bold text-[11px] tracking-wider text-neutral-300">
+                      Waypoint Pin Style & Behavior
+                    </span>
+                  </div>
+                  <span className="text-[10px] font-mono text-amber-400/90 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded">
+                    Configurable
+                  </span>
+                </div>
+
+                {/* Display Mode (Name vs Index vs Both) */}
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-mono uppercase text-neutral-400">
+                    Display Label
+                  </label>
+                  <div className="grid grid-cols-3 gap-1.5 bg-neutral-950 p-1 rounded-lg border border-neutral-800 text-[11px]">
+                    <button
+                      type="button"
+                      onClick={() => handleUpdatePinSettings({ displayMode: 'name', pinStyle: 'badge' })}
+                      className={`py-1.5 px-2 rounded-md font-bold transition-all ${
+                        currentPinSettings.displayMode === 'name'
+                          ? 'bg-amber-500 text-black shadow-sm'
+                          : 'text-neutral-400 hover:text-white'
+                      }`}
+                    >
+                      Name
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleUpdatePinSettings({ displayMode: 'both' })}
+                      className={`py-1.5 px-2 rounded-md font-bold transition-all ${
+                        currentPinSettings.displayMode === 'both'
+                          ? 'bg-amber-500 text-black shadow-sm'
+                          : 'text-neutral-400 hover:text-white'
+                      }`}
+                    >
+                      Both
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleUpdatePinSettings({ displayMode: 'index' })}
+                      className={`py-1.5 px-2 rounded-md font-bold transition-all ${
+                        currentPinSettings.displayMode === 'index'
+                          ? 'bg-amber-500 text-black shadow-sm'
+                          : 'text-neutral-400 hover:text-white'
+                      }`}
+                    >
+                      Number (#)
+                    </button>
+                  </div>
+                </div>
+
+                {/* Approach Reveal Animation Switch */}
+                <div className="pt-2 border-t border-neutral-800/80 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                      <span className="text-[11px] font-bold text-neutral-200">
+                        Appear on Approach
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleUpdatePinSettings({ approachReveal: !currentPinSettings.approachReveal })}
+                      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                        currentPinSettings.approachReveal ? 'bg-amber-500' : 'bg-neutral-800'
+                      }`}
+                    >
+                      <span
+                        className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                          currentPinSettings.approachReveal ? 'translate-x-4' : 'translate-x-0'
+                        }`}
+                      />
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-neutral-400 leading-tight">
+                    Name appears dynamically as the route approaches the waypoint with an arrival pulse.
+                  </p>
+
+                  {currentPinSettings.approachReveal && (
+                    <div className="space-y-2 pt-1 pl-1">
+                      <div className="flex items-center justify-between text-[10px] font-mono text-neutral-400">
+                        <span>Trigger Distance:</span>
+                        <span className="text-amber-400 font-bold">
+                          {currentPinSettings.approachDistanceKm ?? 0.8} km
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0.2"
+                        max="3.0"
+                        step="0.1"
+                        value={currentPinSettings.approachDistanceKm ?? 0.8}
+                        onChange={(e) => handleUpdatePinSettings({ approachDistanceKm: parseFloat(e.target.value) })}
+                        className="w-full h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-amber-500"
+                      />
+                      <div className="flex items-center justify-between text-[9px] font-mono text-neutral-500">
+                        <span>0.2km (Tight)</span>
+                        <span>0.8km (Standard)</span>
+                        <span>3.0km (Early)</span>
+                      </div>
+
+                      <div className="flex items-center justify-between pt-1">
+                        <span className="text-[10px] text-neutral-300">
+                          Keep visible after route passes
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleUpdatePinSettings({ stayVisibleAfterArrival: !currentPinSettings.stayVisibleAfterArrival })}
+                          className="text-neutral-400 hover:text-white"
+                        >
+                          {currentPinSettings.stayVisibleAfterArrival ? (
+                            <CheckSquare className="w-4 h-4 text-amber-400" />
+                          ) : (
+                            <Square className="w-4 h-4 text-neutral-500" />
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Pin Size & Elevation tag */}
+                <div className="pt-2 border-t border-neutral-800/80 grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[10px] font-mono uppercase text-neutral-400 block mb-1">
+                      Pin Size
+                    </label>
+                    <div className="grid grid-cols-3 gap-1 bg-neutral-950 p-1 rounded-lg border border-neutral-800 text-[10px]">
+                      {(['small', 'medium', 'large'] as const).map((sz) => (
+                        <button
+                          key={sz}
+                          type="button"
+                          onClick={() => handleUpdatePinSettings({ pinSize: sz })}
+                          className={`py-1 rounded capitalize font-medium ${
+                            currentPinSettings.pinSize === sz
+                              ? 'bg-neutral-800 text-amber-400 font-bold'
+                              : 'text-neutral-400 hover:text-white'
+                          }`}
+                        >
+                          {sz[0].toUpperCase() + sz.slice(1, 3)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] font-mono uppercase text-neutral-400 block mb-1">
+                      Elevation Tag
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => handleUpdatePinSettings({ showElevation: !currentPinSettings.showElevation })}
+                      className={`w-full py-1.5 px-2 rounded-lg border text-[11px] font-medium flex items-center justify-center gap-1.5 transition-all ${
+                        currentPinSettings.showElevation
+                          ? 'bg-amber-500/10 border-amber-500/40 text-amber-400'
+                          : 'bg-neutral-950 border-neutral-800 text-neutral-400 hover:text-white'
+                      }`}
+                    >
+                      <span>▲ Show Ele</span>
+                      {currentPinSettings.showElevation && <Check className="w-3 h-3" />}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* LIST OF WAYPOINTS */}
+              <div className="flex items-center justify-between pt-1">
                 <span className="font-mono uppercase font-bold text-[11px] tracking-wider text-neutral-400">
-                  WAYPOINTS (&lt;wpt&gt;) ({routeData?.waypoints.length || 0})
+                  Waypoints on Route ({routeData?.waypoints.length || 0})
                 </span>
               </div>
 
@@ -961,6 +1167,134 @@ export const RouteControlsDrawer: React.FC<RouteControlsDrawerProps> = ({
                     }`}
                   />
                 </button>
+              </div>
+
+              {/* Route Title & Subtitle Customizer */}
+              <div className="space-y-3 p-3 rounded-xl bg-neutral-900/60 border border-neutral-800">
+                <div className="flex items-center justify-between">
+                  <span className="font-mono uppercase font-bold text-[11px] tracking-wider text-amber-400">
+                    TITLE & SUBTITLE
+                  </span>
+                  {(customTitle || customSubtitle) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onCustomTitleChange?.('');
+                        onCustomSubtitleChange?.('');
+                      }}
+                      className="text-[10px] text-neutral-400 hover:text-white font-mono cursor-pointer"
+                    >
+                      Reset
+                    </button>
+                  )}
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-mono uppercase text-neutral-400 block">
+                    Broadcast Title
+                  </label>
+                  <input
+                    type="text"
+                    value={customTitle || ''}
+                    placeholder={routeData?.name || 'ROUTE OVERVIEW'}
+                    onChange={(e) => onCustomTitleChange?.(e.target.value)}
+                    className="w-full bg-neutral-950 border border-neutral-700 rounded-lg px-2.5 py-1.5 text-neutral-100 text-xs focus:outline-none focus:border-amber-400 font-mono"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-mono uppercase text-neutral-400 block">
+                    Broadcast Subtitle
+                  </label>
+                  <input
+                    type="text"
+                    value={customSubtitle || ''}
+                    placeholder={`${routeData?.totalDistanceKm || 0} KM • ${customDuration || routeData?.formattedDuration || '2h 15m'} • +${routeData?.elevationGainM || 0}M ELEV`}
+                    onChange={(e) => onCustomSubtitleChange?.(e.target.value)}
+                    className="w-full bg-neutral-950 border border-neutral-700 rounded-lg px-2.5 py-1.5 text-neutral-100 text-xs focus:outline-none focus:border-amber-400 font-mono"
+                  />
+                </div>
+              </div>
+
+              {/* Route Duration in Telemetry Strip */}
+              <div className="space-y-2 p-3 rounded-xl bg-neutral-900/60 border border-neutral-800">
+                <div className="flex items-center justify-between">
+                  <span className="font-mono uppercase font-bold text-[11px] tracking-wider text-amber-400">
+                    ROUTE DURATION (HUD)
+                  </span>
+                  {customDuration && (
+                    <button
+                      type="button"
+                      onClick={() => onCustomDurationChange?.('')}
+                      className="text-[10px] text-neutral-400 hover:text-white font-mono cursor-pointer"
+                    >
+                      Reset
+                    </button>
+                  )}
+                </div>
+                <input
+                  type="text"
+                  value={customDuration || ''}
+                  placeholder={routeData?.formattedDuration || '2h 15m'}
+                  onChange={(e) => onCustomDurationChange?.(e.target.value)}
+                  className="w-full bg-neutral-950 border border-neutral-700 rounded-lg px-2.5 py-1.5 text-neutral-100 text-xs focus:outline-none focus:border-amber-400 font-mono"
+                />
+                <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+                  <span className="text-[9px] text-neutral-500 font-mono uppercase">Presets:</span>
+                  {['1h 30m', '2h 15m', '3h 45m', '4h 30m', '5h 00m'].map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => onCustomDurationChange?.(preset)}
+                      className={`px-2 py-0.5 rounded text-[9px] font-mono uppercase transition-colors cursor-pointer ${
+                        customDuration === preset
+                          ? 'bg-amber-500 text-black font-bold'
+                          : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-300'
+                      }`}
+                    >
+                      {preset}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Flythrough Playback Duration */}
+              <div className="space-y-2.5 p-3 rounded-xl bg-neutral-900/60 border border-neutral-800">
+                <div className="flex items-center justify-between">
+                  <span className="font-mono uppercase font-bold text-[11px] tracking-wider text-amber-400">
+                    FLYTHROUGH PLAYBACK DURATION
+                  </span>
+                  <span className="font-mono text-xs font-bold text-white bg-neutral-800 px-2 py-0.5 rounded">
+                    {flythroughDurationSeconds}s
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="range"
+                    min="5"
+                    max="90"
+                    step="1"
+                    value={flythroughDurationSeconds}
+                    onChange={(e) => onFlythroughDurationSecondsChange?.(parseInt(e.target.value, 10))}
+                    className="w-full h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-amber-500"
+                  />
+                </div>
+                <div className="grid grid-cols-6 gap-1 pt-1 font-mono text-[10px]">
+                  {[10, 15, 20, 24, 30, 60].map((sec) => (
+                    <button
+                      key={sec}
+                      type="button"
+                      onClick={() => onFlythroughDurationSecondsChange?.(sec)}
+                      className={`py-1 rounded text-center transition-colors cursor-pointer ${
+                        flythroughDurationSeconds === sec
+                          ? 'bg-amber-500 text-black font-bold'
+                          : 'bg-neutral-950 hover:bg-neutral-800 text-neutral-300 border border-neutral-800'
+                      }`}
+                    >
+                      {sec}s
+                    </button>
+                  ))}
+                </div>
               </div>
 
               {/* Stage Name Customizer */}

@@ -12,6 +12,7 @@ import { RouteControlsDrawer, BASEMAP_OPTIONS } from './components/RouteControls
 import { VideoExportModal } from './components/VideoExportModal';
 import { TvBannerPartsConfig, DEFAULT_TV_BANNER_PARTS } from './utils/videoExporter';
 import { CinematicIntroOutroConfig, DEFAULT_INTRO_OUTRO_CONFIG } from './utils/cinematicCamera';
+import { WaypointPinSettings, DEFAULT_WAYPOINT_PIN_SETTINGS } from './utils/waypointSettings';
 
 export default function App() {
   const mapViewerRef = useRef<MapViewerHandle | null>(null);
@@ -21,6 +22,9 @@ export default function App() {
   const [routeData, setRouteData] = useState<GpxRouteData>(() => {
     return parseGpx(SAMPLE_ROUTES[0].gpxXml);
   });
+
+  // Waypoint Pin Display and Approach Configuration
+  const [waypointPinSettings, setWaypointPinSettings] = useState<WaypointPinSettings>(DEFAULT_WAYPOINT_PIN_SETTINGS);
 
   // Line effect configuration
   const [lineStyle, setLineStyle] = useState<LineStyleSettings>({
@@ -50,6 +54,12 @@ export default function App() {
   const [stageName, setStageName] = useState<string>('LOCT GPX STAGE');
   const [isDrawerOpen, setIsDrawerOpen] = useState(true);
 
+  // Custom HUD & Telemetry Text Overrides and Flythrough Duration
+  const [customTitle, setCustomTitle] = useState<string>('');
+  const [customSubtitle, setCustomSubtitle] = useState<string>('');
+  const [customDuration, setCustomDuration] = useState<string>('');
+  const [flythroughDurationSeconds, setFlythroughDurationSeconds] = useState<number>(24);
+
   // Cinematic Intro & Outro Sequence Settings (disabled by default for live player; active in Video Export Studio)
   const [introOutroConfig, setIntroOutroConfig] = useState<CinematicIntroOutroConfig>({
     enableIntro: false,
@@ -78,6 +88,9 @@ export default function App() {
       }
       setRouteData(parsed);
       setActiveSampleId(''); // Clear active sample highlight
+      setCustomTitle('');
+      setCustomSubtitle('');
+      setCustomDuration('');
     } catch (err) {
       console.error('Error parsing GPX:', err);
     }
@@ -89,6 +102,9 @@ export default function App() {
       const parsed = parseGpx(sample.gpxXml);
       setRouteData(parsed);
       setActiveSampleId(sample.id);
+      setCustomTitle('');
+      setCustomSubtitle('');
+      setCustomDuration('');
     } catch (err) {
       console.error('Error loading sample route:', err);
     }
@@ -145,6 +161,8 @@ export default function App() {
         basemapStyle={basemapStyle}
         cameraSettings={cameraSettings}
         cinematicIntroOutro={introOutroConfig}
+        waypointPinSettings={waypointPinSettings}
+        flythroughDurationSeconds={flythroughDurationSeconds}
         onCameraChange={handleCameraChange}
         onUpdateWaypointPhoto={handleUpdateWaypointPhoto}
         isDarkTheme={basemapStyle.includes('dark')}
@@ -168,6 +186,12 @@ export default function App() {
           onBannerPartsChange={setTvBannerParts}
           stageName={stageName}
           onStageNameChange={setStageName}
+          customTitle={customTitle}
+          onCustomTitleChange={setCustomTitle}
+          customSubtitle={customSubtitle}
+          onCustomSubtitleChange={setCustomSubtitle}
+          customDuration={customDuration}
+          onCustomDurationChange={setCustomDuration}
         />
       )}
 
@@ -200,6 +224,16 @@ export default function App() {
         onTvBannerPartsChange={setTvBannerParts}
         stageName={stageName}
         onStageNameChange={setStageName}
+        waypointPinSettings={waypointPinSettings}
+        onUpdateWaypointPinSettings={setWaypointPinSettings}
+        customTitle={customTitle}
+        onCustomTitleChange={setCustomTitle}
+        customSubtitle={customSubtitle}
+        onCustomSubtitleChange={setCustomSubtitle}
+        customDuration={customDuration}
+        onCustomDurationChange={setCustomDuration}
+        flythroughDurationSeconds={flythroughDurationSeconds}
+        onFlythroughDurationSecondsChange={setFlythroughDurationSeconds}
       />
 
       {/* 4. Video Export Studio Modal */}
@@ -218,6 +252,12 @@ export default function App() {
         onIntroOutroConfigChange={setIntroOutroConfig}
         stageName={stageName}
         onStageNameChange={setStageName}
+        customTitle={customTitle}
+        customSubtitle={customSubtitle}
+        customDuration={customDuration}
+        flythroughDurationSeconds={flythroughDurationSeconds}
+        waypointPinSettings={waypointPinSettings}
+        onUpdateWaypointPinSettings={(patch) => setWaypointPinSettings((prev) => ({ ...prev, ...patch }))}
       />
     </main>
   );

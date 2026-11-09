@@ -2,6 +2,15 @@
  * Video Exporter utilities and canvas compositing helpers
  */
 
+import { GpxRouteData } from './gpxParser';
+import { 
+  WaypointPinSettings, 
+  DEFAULT_WAYPOINT_PIN_SETTINGS, 
+  computeWaypointsRouteProgress, 
+  getWaypointApproachStatus, 
+  WaypointProgressInfo 
+} from './waypointSettings';
+
 export interface ExportResolution {
   id: '4k' | '1080p' | '720p' | 'vertical-4k' | 'vertical' | 'square';
   label: string;
@@ -312,8 +321,8 @@ export function drawTvBroadcastCardOnCanvas(
     const stats = [
       { label: 'DISTANCE', val: `${routeStats.distanceKm} km`, color: '#ffffff' },
       { label: 'ELEV GAIN', val: `+${routeStats.gainM} m`, color: '#f59e0b' },
-      { label: 'EST. TIME', val: routeStats.duration || '--', color: '#e5e7eb' },
-      { label: 'PINS / WP', val: `${routeStats.waypointsCount} pts`, color: '#06b6d4' },
+      { label: 'DURATION', val: routeStats.duration || '--', color: '#e5e7eb' },
+      { label: 'PEAK ELEV', val: `${routeStats.maxElevM ?? 0} m`, color: '#06b6d4' },
     ];
 
     stats.forEach((st, i) => {
@@ -784,4 +793,419 @@ export function drawOutroCompassRoseOnCanvas(
 
   ctx.restore();
 }
+
+/**
+ * Checks whether a given geographic coordinate is in front of the 3D perspective camera
+ * (preventing homogeneous coordinate divide artifacts where behind-camera points flip back into screen space).
+ */
+export function isPointInFrontOfCamera(
+  map: any,
+  lng: number,
+  lat: number,
+  ele: number = 0
+): boolean {
+  if (!map) return true;
+  try {
+    const tr = map.transform;
+    if (!tr) return true;
+    const matrix = tr.pixelMatrix3D || tr.pixelMatrix;
+    if (!matrix || matrix.length < 16) return true;
+
+    const maxLat = 85.051129;
+    const clampedLat = Math.max(-maxLat, Math.min(maxLat, lat));
+    const d = Math.PI / 180;
+    const sinLat = Math.sin(clampedLat * d);
+    const mercX = (lng + 180) / 360;
+    const mercY = 0.5 - (0.25 * Math.log((1 + sinLat) / (1 - sinLat))) / Math.PI;
+
+    const worldX = mercX * tr.worldSize;
+    const worldY = mercY * tr.worldSize;
+    const worldZ = ele;
+
+    // In a 4x4 column-major matrix, the clip-space W component is row 3:
+    // matrix[3] * worldX + matrix[7] * worldY + matrix[11] * worldZ + matrix[15]
+    const w = matrix[3] * worldX + matrix[7] * worldY + matrix[11] * worldZ + matrix[15];
+    return w > 0.001;
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Renders all active route waypoint pins (Name badges, Index pins, Callouts, Ground markers, and Arrival pulses)
+ * directly onto the composite video export canvas at full export resolution.
+ */
+export function drawWaypointPinsOnCanvas(
+  ctx: CanvasRenderingContext2D,
+  exportWidth: number,
+  exportHeight: number,
+  map: any,
+  mapCanvas: HTMLCanvasElement,
+  drawX: number,
+  drawY: number,
+  drawW: number,
+  drawH: number,
+  routeData: GpxRouteData | null,
+  pinSettings: WaypointPinSettings,
+  accentColor: string,
+  currentProgress: number,
+  wptProgressMap?: Map<string, WaypointProgressInfo>,
+  imageCache?: Map<string, HTMLImageElement>
+): void {
+  if (!ctx || !map || !routeData || !routeData.waypoints || routeData.waypoints.length === 0) {
+    return;
+  }
+
+  const containerW = map.getCanvas?.()?.clientWidth || map.transform?.width || mapCanvas?.width;
+  const containerH = map.getCanvas?.()?.clientHeight || map.transform?.height || mapCanvas?.height;
+  if (!containerW || !containerH) return;
+
+  // Base scale relative to 1080p height/width
+  const baseScale = Math.max(0.65, Math.min(exportWidth, exportHeight) / 1080);
+  const sizeMult = pinSettings.pinSize === 'small' ? 0.8 : pinSettings.pinSize === 'large' ? 1.25 : 1.0;
+  const scale = baseScale * sizeMult;
+
+  const displayMode = pinSettings.displayMode || 'name';
+  const pinStyle = pinSettings.pinStyle || (displayMode === 'name' ? 'badge' : 'classic');
+  const progressMap = wptProgressMap || computeWaypointsRouteProgress(routeData);
+
+  routeData.waypoints.forEach((wpt, index) => {
+    // 1. Check approach reveal and arrival highlight
+    const distInfo = progressMap.get(wpt.id) || { distFromStartKm: 0, progressRatio: 0 };
+    let isRevealed = true;
+    let isActiveArrival = false;
+
+    if (pinSettings.approachReveal) {
+      const status = getWaypointApproachStatus(
+        currentProgress,
+        distInfo.distFromStartKm,
+        routeData.totalDistanceKm,
+        pinSettings.approachDistanceKm ?? 0.8,
+        pinSettings.stayVisibleAfterArrival ?? true
+      );
+      isRevealed = status.isRevealed;
+      isActiveArrival = status.isActiveArrival;
+    }
+
+    if (!isRevealed) {
+      return;
+    }
+
+    // 2. Camera frustum check (points behind perspective camera must not be drawn)
+    if (!isPointInFrontOfCamera(map, wpt.lng, wpt.lat, wpt.ele || 0)) {
+      return;
+    }
+
+    // 3. Project coordinates to map screen coordinates
+    let pt: { x: number; y: number } | null = null;
+    try {
+      pt = map.project([wpt.lng, wpt.lat]);
+    } catch {
+      pt = null;
+    }
+
+    if (!pt || isNaN(pt.x) || isNaN(pt.y)) {
+      return;
+    }
+
+    // 4. Map from MapLibre container pixels to composite export canvas pixels
+    const normX = pt.x / containerW;
+    const normY = pt.y / containerH;
+    const targetX = drawX + normX * drawW;
+    const targetY = drawY + normY * drawH;
+
+    // Skip if far outside visible export viewport
+    if (targetX < -250 || targetX > exportWidth + 250 || targetY < -250 || targetY > exportHeight + 250) {
+      return;
+    }
+
+    ctx.save();
+
+    const activeColor = isActiveArrival ? '#fbbf24' : accentColor;
+    const imgEl = wpt.imageUrl && imageCache ? imageCache.get(wpt.imageUrl) : null;
+    const hasPhotoLoaded = Boolean(imgEl && imgEl.complete && imgEl.naturalWidth > 0);
+
+    // Ground arrival pulse rings
+    if (isActiveArrival) {
+      ctx.save();
+      ctx.strokeStyle = '#fbbf24';
+      ctx.lineWidth = Math.max(1.5, 2.5 * scale);
+      ctx.beginPath();
+      ctx.arc(targetX, targetY, 14 * scale, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.strokeStyle = 'rgba(251, 191, 36, 0.45)';
+      ctx.lineWidth = Math.max(1, 1.8 * scale);
+      ctx.beginPath();
+      ctx.arc(targetX, targetY, 24 * scale, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // Ground anchor dot
+    ctx.fillStyle = activeColor;
+    ctx.beginPath();
+    ctx.arc(targetX, targetY, 4 * scale, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = Math.max(1, 1.2 * scale);
+    ctx.stroke();
+
+    if (displayMode === 'name' || pinStyle === 'badge') {
+      // -------------------------------------------------------------
+      // NAME BADGE PILL (Capsule with pin icon, name, and elevation)
+      // -------------------------------------------------------------
+      const fontSize = Math.round(12.5 * scale);
+      ctx.font = `bold ${fontSize}px -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif`;
+
+      let displayName = wpt.name || `Waypoint ${index + 1}`;
+      const maxTextW = 280 * scale;
+      if (ctx.measureText(displayName).width > maxTextW) {
+        while (displayName.length > 3 && ctx.measureText(displayName + '...').width > maxTextW) {
+          displayName = displayName.slice(0, -1);
+        }
+        displayName += '...';
+      }
+      const nameWidth = ctx.measureText(displayName).width;
+
+      let eleText = '';
+      let eleWidth = 0;
+      if (pinSettings.showElevation && wpt.ele !== undefined) {
+        eleText = `▲ ${wpt.ele}m`;
+        ctx.font = `bold ${Math.round(10 * scale)}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+        eleWidth = ctx.measureText(eleText).width + 12 * scale;
+      }
+
+      const iconDiameter = 18 * scale;
+      const paddingH = 10 * scale;
+      const pillHeight = 28 * scale;
+      const pillWidth = paddingH * 2 + iconDiameter + 6 * scale + nameWidth + (eleWidth > 0 ? eleWidth + 5 * scale : 0);
+
+      const pillLeft = targetX - pillWidth / 2;
+      const arrowH = 7 * scale;
+      const pillTop = targetY - arrowH - pillHeight - 4 * scale;
+
+      // Drop shadow and glow
+      ctx.shadowColor = isActiveArrival ? 'rgba(251, 191, 36, 0.55)' : 'rgba(0, 0, 0, 0.7)';
+      ctx.shadowBlur = (isActiveArrival ? 14 : 10) * scale;
+      ctx.shadowOffsetY = 3 * scale;
+
+      // Background capsule
+      ctx.fillStyle = 'rgba(13, 15, 20, 0.94)';
+      ctx.strokeStyle = activeColor;
+      ctx.lineWidth = (isActiveArrival ? 2.5 : 1.6) * scale;
+
+      const r = pillHeight / 2;
+      ctx.beginPath();
+      ctx.moveTo(pillLeft + r, pillTop);
+      ctx.lineTo(pillLeft + pillWidth - r, pillTop);
+      ctx.arc(pillLeft + pillWidth - r, pillTop + r, r, -Math.PI / 2, Math.PI / 2);
+      ctx.lineTo(pillLeft + r, pillTop + pillHeight);
+      ctx.arc(pillLeft + r, pillTop + r, r, Math.PI / 2, -Math.PI / 2);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      // Downward pointer arrow
+      ctx.fillStyle = activeColor;
+      ctx.beginPath();
+      ctx.moveTo(targetX - 5.5 * scale, pillTop + pillHeight);
+      ctx.lineTo(targetX + 5.5 * scale, pillTop + pillHeight);
+      ctx.lineTo(targetX, targetY - 4 * scale);
+      ctx.closePath();
+      ctx.fill();
+
+      // Reset shadow for crisp text & icon
+      ctx.shadowColor = 'transparent';
+      ctx.shadowBlur = 0;
+      ctx.shadowOffsetY = 0;
+
+      // Icon (or photo thumbnail if available)
+      const iconCenterX = pillLeft + paddingH + iconDiameter / 2;
+      const iconCenterY = pillTop + pillHeight / 2;
+
+      if (hasPhotoLoaded && imgEl) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(iconCenterX, iconCenterY, iconDiameter / 2, 0, Math.PI * 2);
+        ctx.clip();
+        ctx.drawImage(imgEl, iconCenterX - iconDiameter / 2, iconCenterY - iconDiameter / 2, iconDiameter, iconDiameter);
+        ctx.restore();
+        ctx.strokeStyle = activeColor;
+        ctx.lineWidth = 1 * scale;
+        ctx.beginPath();
+        ctx.arc(iconCenterX, iconCenterY, iconDiameter / 2, 0, Math.PI * 2);
+        ctx.stroke();
+      } else {
+        // Map pin vector glyph
+        ctx.fillStyle = activeColor;
+        ctx.beginPath();
+        ctx.arc(iconCenterX, iconCenterY - 1.5 * scale, 4.5 * scale, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.arc(iconCenterX, iconCenterY - 1.5 * scale, 1.8 * scale, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Name Text
+      const textX = pillLeft + paddingH + iconDiameter + 6 * scale;
+      const textY = pillTop + pillHeight / 2;
+      ctx.font = `bold ${fontSize}px -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif`;
+      ctx.fillStyle = '#f9fafb';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(displayName, textX, textY);
+
+      // Elevation tag
+      if (eleWidth > 0) {
+        const eleX = textX + nameWidth + 5 * scale;
+        const eleH = 17 * scale;
+        const eleY = pillTop + (pillHeight - eleH) / 2;
+        const eleW = eleWidth;
+        const eleR = eleH / 2;
+
+        ctx.fillStyle = 'rgba(245, 158, 11, 0.2)';
+        ctx.strokeStyle = 'rgba(245, 158, 11, 0.45)';
+        ctx.lineWidth = 1 * scale;
+        ctx.beginPath();
+        ctx.moveTo(eleX + eleR, eleY);
+        ctx.lineTo(eleX + eleW - eleR, eleY);
+        ctx.arc(eleX + eleW - eleR, eleY + eleR, eleR, -Math.PI / 2, Math.PI / 2);
+        ctx.lineTo(eleX + eleR, eleY + eleH);
+        ctx.arc(eleX + eleR, eleY + eleR, eleR, Math.PI / 2, -Math.PI / 2);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.font = `bold ${Math.round(10 * scale)}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+        ctx.fillStyle = '#fbbf24';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(eleText, eleX + eleW / 2, eleY + eleH / 2);
+      }
+
+    } else if (displayMode === 'both') {
+      // -------------------------------------------------------------
+      // BOTH: Name callout box above + circular index pin below
+      // -------------------------------------------------------------
+      const calloutFont = Math.round(11 * scale);
+      ctx.font = `bold ${calloutFont}px -apple-system, BlinkMacSystemFont, "Inter", sans-serif`;
+      const nameW = ctx.measureText(wpt.name).width;
+      const calloutW = nameW + 16 * scale;
+      const calloutH = 20 * scale;
+
+      const pinRadius = 15 * scale;
+      const arrowH = 6 * scale;
+      const pinCenterY = targetY - arrowH - pinRadius - 3 * scale;
+      const calloutTop = pinCenterY - pinRadius - calloutH - 4 * scale;
+
+      // Callout box
+      ctx.fillStyle = 'rgba(10, 10, 10, 0.92)';
+      ctx.strokeStyle = 'rgba(245, 158, 11, 0.7)';
+      ctx.lineWidth = 1 * scale;
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.6)';
+      ctx.shadowBlur = 8 * scale;
+
+      const cr = 4 * scale;
+      const cl = targetX - calloutW / 2;
+      ctx.beginPath();
+      if (typeof ctx.roundRect === 'function') {
+        ctx.roundRect(cl, calloutTop, calloutW, calloutH, cr);
+      } else {
+        ctx.rect(cl, calloutTop, calloutW, calloutH);
+      }
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.shadowColor = 'transparent';
+      ctx.fillStyle = '#ffffff';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(wpt.name, targetX, calloutTop + calloutH / 2);
+
+      // Circular Index Pin
+      ctx.fillStyle = '#0a0a0a';
+      ctx.strokeStyle = activeColor;
+      ctx.lineWidth = (isActiveArrival ? 3 : 2) * scale;
+      ctx.beginPath();
+      ctx.arc(targetX, pinCenterY, pinRadius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+
+      // Pointer Arrow
+      ctx.fillStyle = activeColor;
+      ctx.beginPath();
+      ctx.moveTo(targetX - 5 * scale, pinCenterY + pinRadius - 1);
+      ctx.lineTo(targetX + 5 * scale, pinCenterY + pinRadius - 1);
+      ctx.lineTo(targetX, targetY - 3 * scale);
+      ctx.closePath();
+      ctx.fill();
+
+      // Number in pin
+      ctx.font = `bold ${Math.round(11 * scale)}px ui-monospace, SFMono-Regular, monospace`;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(String(index + 1), targetX, pinCenterY);
+
+    } else {
+      // -------------------------------------------------------------
+      // INDEX PIN (or MINIMAL style)
+      // -------------------------------------------------------------
+      if (pinStyle === 'minimal') {
+        const miniRadius = 7 * scale;
+        ctx.fillStyle = '#ffffff';
+        ctx.strokeStyle = activeColor;
+        ctx.lineWidth = 2 * scale;
+        ctx.shadowColor = activeColor;
+        ctx.shadowBlur = 8 * scale;
+        ctx.beginPath();
+        ctx.arc(targetX, targetY - miniRadius - 2 * scale, miniRadius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      } else {
+        const pinRadius = 15 * scale;
+        const arrowH = 6 * scale;
+        const pinCenterY = targetY - arrowH - pinRadius - 3 * scale;
+
+        ctx.shadowColor = isActiveArrival ? 'rgba(251, 191, 36, 0.5)' : 'rgba(0, 0, 0, 0.7)';
+        ctx.shadowBlur = 10 * scale;
+
+        ctx.fillStyle = '#0a0a0a';
+        ctx.strokeStyle = activeColor;
+        ctx.lineWidth = (isActiveArrival ? 3 : 2) * scale;
+        ctx.beginPath();
+        ctx.arc(targetX, pinCenterY, pinRadius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = activeColor;
+        ctx.beginPath();
+        ctx.moveTo(targetX - 5 * scale, pinCenterY + pinRadius - 1);
+        ctx.lineTo(targetX + 5 * scale, pinCenterY + pinRadius - 1);
+        ctx.lineTo(targetX, targetY - 3 * scale);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.shadowColor = 'transparent';
+        if (hasPhotoLoaded && imgEl) {
+          ctx.save();
+          ctx.beginPath();
+          ctx.arc(targetX, pinCenterY, pinRadius - 2 * scale, 0, Math.PI * 2);
+          ctx.clip();
+          ctx.drawImage(imgEl, targetX - pinRadius, pinCenterY - pinRadius, pinRadius * 2, pinRadius * 2);
+          ctx.restore();
+        } else {
+          ctx.font = `bold ${Math.round(11 * scale)}px ui-monospace, SFMono-Regular, monospace`;
+          ctx.fillStyle = '#ffffff';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(String(index + 1), targetX, pinCenterY);
+        }
+      }
+    }
+
+    ctx.restore();
+  });
+}
+
 

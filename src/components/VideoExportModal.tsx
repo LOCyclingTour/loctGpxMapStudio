@@ -14,8 +14,14 @@ import {
   DEFAULT_TV_BANNER_PARTS,
   ElevationOverlayPosition,
   waitForMapFrame,
-  drawOutroCompassRoseOnCanvas
+  drawOutroCompassRoseOnCanvas,
+  drawWaypointPinsOnCanvas
 } from '../utils/videoExporter';
+import { 
+  WaypointPinSettings, 
+  DEFAULT_WAYPOINT_PIN_SETTINGS, 
+  computeWaypointsRouteProgress 
+} from '../utils/waypointSettings';
 import { MapViewerHandle, FollowCamMode } from './MapViewer';
 import { 
   CinematicIntroOutroConfig, 
@@ -52,7 +58,8 @@ import {
   Navigation,
   Compass,
   ShieldCheck,
-  Zap
+  Zap,
+  MapPin
 } from 'lucide-react';
 
 interface VideoExportModalProps {
@@ -70,6 +77,12 @@ interface VideoExportModalProps {
   onIntroOutroConfigChange?: (config: CinematicIntroOutroConfig) => void;
   stageName?: string;
   onStageNameChange?: (name: string) => void;
+  customTitle?: string;
+  customSubtitle?: string;
+  customDuration?: string;
+  flythroughDurationSeconds?: number;
+  waypointPinSettings?: WaypointPinSettings;
+  onUpdateWaypointPinSettings?: (settings: Partial<WaypointPinSettings>) => void;
 }
 
 export const VideoExportModal: React.FC<VideoExportModalProps> = ({
@@ -87,14 +100,36 @@ export const VideoExportModal: React.FC<VideoExportModalProps> = ({
   onIntroOutroConfigChange,
   stageName,
   onStageNameChange,
+  customTitle,
+  customSubtitle,
+  customDuration,
+  flythroughDurationSeconds,
+  waypointPinSettings,
+  onUpdateWaypointPinSettings,
 }) => {
   const [selectedResolution, setSelectedResolution] = useState<ExportResolution>(VIDEO_RESOLUTIONS[0]);
-  const [durationSeconds, setDurationSeconds] = useState<number>(15);
+  const [durationSeconds, setDurationSeconds] = useState<number>(() => flythroughDurationSeconds || 15);
   const [fps, setFps] = useState<number>(30);
   const [cameraMode, setCameraMode] = useState<FollowCamMode>(() => initialFollowMode || 'calm');
   const [includeOverlay, setIncludeOverlay] = useState<boolean>(true);
   const [bannerParts, setBannerParts] = useState<TvBannerPartsConfig>(() => initialBannerParts || DEFAULT_TV_BANNER_PARTS);
   const [isCustomizingBanner, setIsCustomizingBanner] = useState<boolean>(false);
+  const [includeWaypointPins, setIncludeWaypointPins] = useState<boolean>(true);
+  const [currentPinSettings, setCurrentPinSettings] = useState<WaypointPinSettings>(() => waypointPinSettings || DEFAULT_WAYPOINT_PIN_SETTINGS);
+
+  useEffect(() => {
+    if (waypointPinSettings) {
+      setCurrentPinSettings(waypointPinSettings);
+    }
+  }, [waypointPinSettings]);
+
+  const handleUpdatePinSettings = (patch: Partial<WaypointPinSettings>) => {
+    setCurrentPinSettings((prev) => {
+      const updated = { ...prev, ...patch };
+      onUpdateWaypointPinSettings?.(patch);
+      return updated;
+    });
+  };
 
   // Cinematic Intro & Outro Configuration State (enabled by default for Video Export)
   const [introOutro, setIntroOutro] = useState<CinematicIntroOutroConfig>(
@@ -187,9 +222,9 @@ export const VideoExportModal: React.FC<VideoExportModalProps> = ({
       setRecordedBlob(null);
     }
 
-    // Set up export canvas
-    const exportWidth = selectedResolution.width;
-    const exportHeight = selectedResolution.height;
+    // Set up export canvas (ensuring strictly even dimensions for all video codecs)
+    const exportWidth = selectedResolution.width - (selectedResolution.width % 2);
+    const exportHeight = selectedResolution.height - (selectedResolution.height % 2);
     
     let canvas = canvasRef.current;
     if (!canvas) {
@@ -249,13 +284,30 @@ export const VideoExportModal: React.FC<VideoExportModalProps> = ({
     let videoEncoder: any = null;
     let target: any = null;
 
+    let encoderError: any = null;
+
     if (hasWebCodecs) {
-      const candidateCodecs = [
-        'avc1.640034', // AVC High Profile 5.2 (4K up to 60fps)
-        'avc1.4d002a', // AVC Main Profile
-        'avc1.42001f', // AVC Baseline Profile
-        'vp09.00.10.08', // VP9 Profile 0
-      ];
+      const is4K = exportWidth >= 3840 || exportHeight >= 3840;
+      // Candidate codecs in order of reliability for target resolution
+      // For 4K, VP9 profiles (5.1 / 5.0) are vastly more reliable across browsers than OpenH264
+      const candidateCodecs = is4K
+        ? [
+            'vp09.00.51.08', // VP9 Profile 0, Level 5.1 (4K up to 60fps)
+            'vp09.00.50.08', // VP9 Profile 0, Level 5.0 (4K 30fps)
+            'avc1.640033',   // AVC High 5.1
+            'avc1.640034',   // AVC High 5.2
+            'vp09.00.41.08', // VP9 Level 4.1
+            'av01.0.12M.08', // AV1 4K
+          ]
+        : [
+            'avc1.64002a',   // AVC High Profile 4.2
+            'avc1.4d002a',   // AVC Main Profile
+            'avc1.42001f',   // AVC Baseline Profile
+            'vp09.00.41.08', // VP9 Profile 0 Level 4.1
+            'vp09.00.10.08', // VP9 Profile 0
+          ];
+
+      const effectiveBitrate = selectedResolution.bitrate || (is4K ? 35000000 : 16000000);
 
       let chosenCodec: string | null = null;
       for (const codec of candidateCodecs) {
@@ -264,10 +316,58 @@ export const VideoExportModal: React.FC<VideoExportModalProps> = ({
             codec,
             width: exportWidth,
             height: exportHeight,
-            bitrate: selectedResolution.bitrate || (exportWidth >= 3840 ? 35000000 : 16000000),
+            bitrate: effectiveBitrate,
             framerate: fps,
           });
-          if (testRes?.supported) {
+          if (!testRes?.supported) continue;
+
+          // Quick dry-run verification: actually encode 1 test frame to verify hardware/software encoder doesn't reject the resolution
+          const isViable = await new Promise<boolean>((resolve) => {
+            let failed = false;
+            let testEnc: any = null;
+            try {
+              testEnc = new (window as any).VideoEncoder({
+                output: () => {},
+                error: () => {
+                  failed = true;
+                  resolve(false);
+                },
+              });
+
+              const config: any = {
+                codec,
+                width: exportWidth,
+                height: exportHeight,
+                bitrate: effectiveBitrate,
+                framerate: fps,
+              };
+              if (codec.startsWith('avc1')) {
+                config.avc = { format: 'avc' };
+              }
+
+              testEnc.configure(config);
+
+              const testCanvas = document.createElement('canvas');
+              testCanvas.width = exportWidth;
+              testCanvas.height = exportHeight;
+              const testFrame = new (window as any).VideoFrame(testCanvas, { timestamp: 0 });
+              testEnc.encode(testFrame, { keyFrame: true });
+              testFrame.close();
+
+              testEnc.flush()
+                .then(() => {
+                  try {
+                    if (testEnc.state === 'configured') testEnc.close();
+                  } catch (e) {}
+                  resolve(!failed);
+                })
+                .catch(() => resolve(false));
+            } catch (err) {
+              resolve(false);
+            }
+          });
+
+          if (isViable) {
             chosenCodec = codec;
             break;
           }
@@ -279,7 +379,10 @@ export const VideoExportModal: React.FC<VideoExportModalProps> = ({
       if (chosenCodec) {
         try {
           target = new ArrayBufferTarget();
-          const muxCodec = chosenCodec.startsWith('vp') ? 'vp9' : 'avc';
+          const muxCodec = chosenCodec.startsWith('vp')
+            ? 'vp9'
+            : (chosenCodec.startsWith('av01') ? 'av1' : 'avc');
+
           muxer = new Muxer({
             target,
             video: {
@@ -295,17 +398,23 @@ export const VideoExportModal: React.FC<VideoExportModalProps> = ({
             output: (chunk: any, meta: any) => muxer.addVideoChunk(chunk, meta),
             error: (e: any) => {
               console.error('VideoEncoder error:', e);
+              encoderError = e;
               setExportError(`Video encoding error: ${e?.message || e}`);
             },
           });
 
-          await videoEncoder.configure({
+          const encoderConfig: any = {
             codec: chosenCodec,
             width: exportWidth,
             height: exportHeight,
-            bitrate: selectedResolution.bitrate || (exportWidth >= 3840 ? 35000000 : 16000000),
+            bitrate: effectiveBitrate,
             framerate: fps,
-          });
+          };
+          if (chosenCodec.startsWith('avc1')) {
+            encoderConfig.avc = { format: 'avc' };
+          }
+
+          await videoEncoder.configure(encoderConfig);
 
           useMuxer = true;
           setVideoFormat('mp4');
@@ -377,6 +486,20 @@ export const VideoExportModal: React.FC<VideoExportModalProps> = ({
       : point0.bearing;
 
     let lastFlyCamera: { center: [number, number]; zoom: number; pitch: number; bearing: number } | null = null;
+
+    // Precompute waypoint progress and preload any custom waypoint thumbnails for instant rendering
+    const wptProgressMap = computeWaypointsRouteProgress(routeData);
+    const imageCache = new Map<string, HTMLImageElement>();
+    if (routeData.waypoints) {
+      routeData.waypoints.forEach((wpt) => {
+        if (wpt.imageUrl) {
+          const img = new Image();
+          img.crossOrigin = 'anonymous';
+          img.src = wpt.imageUrl;
+          imageCache.set(wpt.imageUrl, img);
+        }
+      });
+    }
 
     // Frame-Accurate Capture Loop: Every frame waits for 3D tiles & elevation to be loaded
     try {
@@ -508,16 +631,16 @@ export const VideoExportModal: React.FC<VideoExportModalProps> = ({
         ctx.fillStyle = '#0a0a0a';
         ctx.fillRect(0, 0, exportWidth, exportHeight);
 
+        let drawW = exportWidth;
+        let drawH = exportHeight;
+        let drawX = 0;
+        let drawY = 0;
+
         try {
           const mapW = mapCanvas.width;
           const mapH = mapCanvas.height;
           const mapAspect = mapW / mapH;
           const targetAspect = exportWidth / exportHeight;
-
-          let drawW = exportWidth;
-          let drawH = exportHeight;
-          let drawX = 0;
-          let drawY = 0;
 
           if (mapAspect > targetAspect) {
             drawW = exportHeight * mapAspect;
@@ -532,15 +655,40 @@ export const VideoExportModal: React.FC<VideoExportModalProps> = ({
           // In case of canvas read error
         }
 
+        // 0. Draw Waypoint Pins (Name badges, icons, elevation tags, arrival pulses, and ground pins)
+        if (includeWaypointPins && routeData.waypoints && routeData.waypoints.length > 0) {
+          drawWaypointPinsOnCanvas(
+            ctx,
+            exportWidth,
+            exportHeight,
+            map,
+            mapCanvas,
+            drawX,
+            drawY,
+            drawW,
+            drawH,
+            routeData,
+            currentPinSettings,
+            accentColor,
+            effectiveRouteProgress,
+            wptProgressMap,
+            imageCache
+          );
+        }
+
         // 1. Draw TV Lower-Third broadcast graphic
         let tvCardInfo = { cardX: 0, cardY: exportHeight, cardWidth: 0, cardHeight: 0 };
         if (includeOverlay) {
+          const exportTitle = customTitle || routeData.name || 'ROUTE OVERVIEW';
+          const exportDuration = customDuration || routeData.formattedDuration || '2h 15m';
+          const exportSubtitle = customSubtitle || `${routeData.totalDistanceKm} KM (${routeData.totalDistanceMiles} MI) • ${exportDuration} • +${routeData.elevationGainM}M ELEVATION`;
+
           tvCardInfo = drawTvBroadcastCardOnCanvas(
             ctx,
             exportWidth,
             exportHeight,
-            routeData.name,
-            autoSubtitle,
+            exportTitle,
+            exportSubtitle,
             accentColor,
             effectiveRouteProgress,
             is3dTerrain,
@@ -549,7 +697,7 @@ export const VideoExportModal: React.FC<VideoExportModalProps> = ({
             {
               distanceKm: routeData.totalDistanceKm,
               gainM: routeData.elevationGainM,
-              duration: routeData.formattedDuration,
+              duration: exportDuration,
               waypointsCount: routeData.waypoints.length,
               maxElevM: routeData.maxElevationM,
               statusBadgeText,
@@ -601,6 +749,13 @@ export const VideoExportModal: React.FC<VideoExportModalProps> = ({
 
         // 4. Encode frame with exact microsecond timestamp (zero wall-clock desync or lag)
         if (useMuxer && videoEncoder) {
+          if (encoderError || videoEncoder.state !== 'configured') {
+            throw new Error(
+              encoderError?.message ||
+              'Video encoder closed unexpectedly. Please try 1080p resolution or a lower framerate.'
+            );
+          }
+
           const timestampMicros = Math.round((frameIdx * 1_000_000) / fps);
           const durationMicros = Math.round(1_000_000 / fps);
           const isKeyFrame = frameIdx % (fps * 2) === 0;
@@ -609,12 +764,16 @@ export const VideoExportModal: React.FC<VideoExportModalProps> = ({
             timestamp: timestampMicros,
             duration: durationMicros,
           });
-          videoEncoder.encode(videoFrame, { keyFrame: isKeyFrame });
-          videoFrame.close();
 
-          // Apply slight backpressure if encode queue builds up
-          if (videoEncoder.encodeQueueSize > 6) {
-            await new Promise((r) => setTimeout(r, 15));
+          try {
+            videoEncoder.encode(videoFrame, { keyFrame: isKeyFrame });
+          } finally {
+            videoFrame.close();
+          }
+
+          // Strict backpressure queue management: wait if encoder is busy processing previous frames (critical for 4K)
+          while (videoEncoder.state === 'configured' && videoEncoder.encodeQueueSize > 2) {
+            await new Promise((r) => setTimeout(r, 20));
           }
         } else {
           // MediaRecorder mode: give recorder adequate slice to grab the canvas buffer
@@ -628,6 +787,9 @@ export const VideoExportModal: React.FC<VideoExportModalProps> = ({
       }
 
       if (stopRequestedRef.current) {
+        if (videoEncoder && videoEncoder.state === 'configured') {
+          try { videoEncoder.close(); } catch (e) {}
+        }
         restoreMapState();
         setIsRecording(false);
         return;
@@ -638,7 +800,10 @@ export const VideoExportModal: React.FC<VideoExportModalProps> = ({
       setRecordProgress(1);
 
       if (useMuxer && videoEncoder) {
-        await videoEncoder.flush();
+        if (videoEncoder.state === 'configured') {
+          await videoEncoder.flush();
+          try { videoEncoder.close(); } catch (e) {}
+        }
         muxer.finalize();
         const buffer = target.buffer;
         const blob = new Blob([buffer], { type: 'video/mp4' });
@@ -663,6 +828,9 @@ export const VideoExportModal: React.FC<VideoExportModalProps> = ({
       }
     } catch (err: any) {
       console.error('Recording failed:', err);
+      if (videoEncoder && videoEncoder.state === 'configured') {
+        try { videoEncoder.close(); } catch (e) {}
+      }
       restoreMapState();
       setExportError(`Export failed: ${err?.message || 'Unknown error during frame capture'}`);
       setIsRecording(false);
@@ -1442,6 +1610,109 @@ export const VideoExportModal: React.FC<VideoExportModalProps> = ({
                           {posOpt.label}
                         </button>
                       ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Waypoint Pins on Map Overlay */}
+              <div className="space-y-3 p-3.5 rounded-xl bg-neutral-900/60 border border-neutral-800">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <MapPin className="w-4 h-4 text-amber-400" />
+                    <div>
+                      <div className="font-mono font-bold text-xs text-white flex items-center gap-1.5">
+                        <span>WAYPOINT PINS ON MAP</span>
+                        {routeData.waypoints && routeData.waypoints.length > 0 && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                            {routeData.waypoints.length} WAYPOINTS
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-[10px] text-neutral-400">
+                        {currentPinSettings.displayMode === 'name' 
+                          ? 'Renders crisp route checkpoint name badges and elevation tags'
+                          : 'Renders map checkpoint pins and elevation callouts'}
+                      </div>
+                    </div>
+                  </div>
+
+                  <input
+                    type="checkbox"
+                    checked={includeWaypointPins}
+                    onChange={(e) => setIncludeWaypointPins(e.target.checked)}
+                    aria-label="Include Waypoint Pins in export"
+                    className="w-4 h-4 accent-amber-500 rounded cursor-pointer"
+                  />
+                </div>
+
+                {includeWaypointPins && routeData.waypoints && routeData.waypoints.length > 0 && (
+                  <div className="pt-2 border-t border-neutral-800/80 space-y-2.5">
+                    {/* Display Label Selector */}
+                    <div>
+                      <div className="text-[10px] font-mono text-neutral-400 uppercase mb-1">
+                        PIN DISPLAY LABEL:
+                      </div>
+                      <div className="grid grid-cols-3 gap-1.5 bg-neutral-950 p-1 rounded-lg border border-neutral-800 text-[11px]">
+                        <button
+                          type="button"
+                          onClick={() => handleUpdatePinSettings({ displayMode: 'name', pinStyle: 'badge' })}
+                          className={`py-1.5 px-2 rounded-md font-bold transition-all cursor-pointer ${
+                            currentPinSettings.displayMode === 'name'
+                              ? 'bg-amber-500 text-black shadow-sm'
+                              : 'text-neutral-400 hover:text-white'
+                          }`}
+                        >
+                          Name
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleUpdatePinSettings({ displayMode: 'both' })}
+                          className={`py-1.5 px-2 rounded-md font-bold transition-all cursor-pointer ${
+                            currentPinSettings.displayMode === 'both'
+                              ? 'bg-amber-500 text-black shadow-sm'
+                              : 'text-neutral-400 hover:text-white'
+                          }`}
+                        >
+                          Both
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleUpdatePinSettings({ displayMode: 'index' })}
+                          className={`py-1.5 px-2 rounded-md font-bold transition-all cursor-pointer ${
+                            currentPinSettings.displayMode === 'index'
+                              ? 'bg-amber-500 text-black shadow-sm'
+                              : 'text-neutral-400 hover:text-white'
+                          }`}
+                        >
+                          Number (#)
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Appear on Approach Switch */}
+                    <div className="flex items-center justify-between pt-1">
+                      <div>
+                        <span className="font-mono font-bold text-[10px] text-neutral-200">
+                          DYNAMIC APPEAR ON APPROACH
+                        </span>
+                        <p className="text-[9px] text-neutral-400">
+                          Name badges dynamically appear with an arrival pulse as the route reaches each waypoint
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleUpdatePinSettings({ approachReveal: !currentPinSettings.approachReveal })}
+                        className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${
+                          currentPinSettings.approachReveal ? 'bg-amber-500' : 'bg-neutral-800'
+                        }`}
+                      >
+                        <span
+                          className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                            currentPinSettings.approachReveal ? 'translate-x-4' : 'translate-x-0'
+                          }`}
+                        />
+                      </button>
                     </div>
                   </div>
                 )}

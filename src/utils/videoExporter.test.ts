@@ -7,7 +7,10 @@ import {
   getSupportedVideoMimeType,
   DEFAULT_TV_BANNER_PARTS,
   drawOutroCompassRoseOnCanvas,
+  isPointInFrontOfCamera,
+  drawWaypointPinsOnCanvas,
 } from './videoExporter.ts';
+import { DEFAULT_WAYPOINT_PIN_SETTINGS } from './waypointSettings.ts';
 
 test('calculateTotalFrames calculates frames from duration and fps', () => {
   assert.equal(calculateTotalFrames(10, 30), 300);
@@ -71,4 +74,135 @@ test('drawOutroCompassRoseOnCanvas handles boundary progress safely', () => {
   drawOutroCompassRoseOnCanvas(null as any, 100, 100, 50, -0.5);
   assert.ok(true);
 });
+
+test('isPointInFrontOfCamera handles edge cases safely', () => {
+  // Gracefully handles missing map or transform
+  assert.equal(isPointInFrontOfCamera(null, 10, 45), true);
+  assert.equal(isPointInFrontOfCamera({}, 10, 45), true);
+
+  // When transform matrix has positive W, point is in front
+  const mockMap = {
+    transform: {
+      worldSize: 512,
+      pixelMatrix: [
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 1, 0,
+        0, 0, 0, 1 // w = 1 > 0
+      ]
+    }
+  };
+  assert.equal(isPointInFrontOfCamera(mockMap, 0, 0), true);
+
+  // When transform matrix has negative W, point is behind camera
+  const mockMapBehind = {
+    transform: {
+      worldSize: 512,
+      pixelMatrix: [
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 1, 0,
+        0, 0, 0, -1 // w = -1 < 0
+      ]
+    }
+  };
+  assert.equal(isPointInFrontOfCamera(mockMapBehind, 0, 0), false);
+});
+
+test('drawWaypointPinsOnCanvas handles empty, null or valid route data without error', () => {
+  // Null / empty routes should return gracefully
+  drawWaypointPinsOnCanvas(
+    null as any, 1920, 1080, null, null as any, 0, 0, 1920, 1080, null, DEFAULT_WAYPOINT_PIN_SETTINGS, '#f59e0b', 0.5
+  );
+
+  const mockCtx = {
+    save: () => {},
+    restore: () => {},
+    beginPath: () => {},
+    arc: () => {},
+    fill: () => {},
+    stroke: () => {},
+    moveTo: () => {},
+    lineTo: () => {},
+    closePath: () => {},
+    fillText: () => {},
+    measureText: (text: string) => ({ width: text.length * 8 }),
+  };
+
+  const mockMap = {
+    getCanvas: () => ({ clientWidth: 1920, clientHeight: 1080 }),
+    transform: { width: 1920, height: 1080 },
+    project: ([lng, lat]: [number, number]) => ({ x: 500, y: 400 }),
+  };
+
+  const mockRoute = {
+    name: 'Sample Route',
+    totalDistanceKm: 10,
+    totalDistanceMiles: 6.2,
+    elevationGainM: 350,
+    elevationLossM: 350,
+    maxElevationM: 1200,
+    minElevationM: 850,
+    points: [],
+    coordinates: [[10, 45]],
+    waypoints: [
+      { id: 'wpt-1', name: 'Trailhead Checkpoint', lat: 45.1, lng: 10.1, ele: 900 },
+      { id: 'wpt-2', name: 'Alpine Peak', lat: 45.2, lng: 10.2, ele: 1200 }
+    ],
+  };
+
+  // Name pin mode (badge)
+  drawWaypointPinsOnCanvas(
+    mockCtx as any,
+    1920,
+    1080,
+    mockMap,
+    { width: 1920, height: 1080 } as any,
+    0,
+    0,
+    1920,
+    1080,
+    mockRoute as any,
+    { ...DEFAULT_WAYPOINT_PIN_SETTINGS, displayMode: 'name', approachReveal: false },
+    '#f59e0b',
+    0.5
+  );
+
+  // Both mode
+  drawWaypointPinsOnCanvas(
+    mockCtx as any,
+    1920,
+    1080,
+    mockMap,
+    { width: 1920, height: 1080 } as any,
+    0,
+    0,
+    1920,
+    1080,
+    mockRoute as any,
+    { ...DEFAULT_WAYPOINT_PIN_SETTINGS, displayMode: 'both', approachReveal: false },
+    '#f59e0b',
+    0.5
+  );
+
+  // Index mode
+  drawWaypointPinsOnCanvas(
+    mockCtx as any,
+    1920,
+    1080,
+    mockMap,
+    { width: 1920, height: 1080 } as any,
+    0,
+    0,
+    1920,
+    1080,
+    mockRoute as any,
+    { ...DEFAULT_WAYPOINT_PIN_SETTINGS, displayMode: 'index', approachReveal: false },
+    '#f59e0b',
+    0.5
+  );
+
+  assert.ok(true);
+});
+
 
