@@ -20,7 +20,10 @@ import {
 import { 
   WaypointPinSettings, 
   DEFAULT_WAYPOINT_PIN_SETTINGS, 
-  computeWaypointsRouteProgress 
+  computeWaypointsRouteProgress,
+  MIN_WAYPOINT_FONT_SIZE,
+  MAX_WAYPOINT_FONT_SIZE,
+  DEFAULT_WAYPOINT_FONT_SIZE
 } from '../utils/waypointSettings';
 import { MapViewerHandle, FollowCamMode } from './MapViewer';
 import { 
@@ -34,7 +37,7 @@ import {
   calculateOutroCamera,
   isOutroRoseActive
 } from '../utils/cinematicCamera';
-import { getRoutePointAtProgress } from '../utils/routeFollow';
+import { getRoutePointAtProgress, getCalmRouteTarget } from '../utils/routeFollow';
 import { altitudeToZoom } from '../utils/cameraMath';
 import { 
   Film, 
@@ -481,9 +484,10 @@ export const VideoExportModal: React.FC<VideoExportModalProps> = ({
     const initialFlyPitch = is3dTerrain
       ? (cameraPitch !== undefined ? cameraPitch : (map ? map.getPitch() : 55))
       : 0;
+    const calmStart = getCalmRouteTarget(routeData, 0);
     const initialFlyBearing = cameraMode === 'fixed'
       ? (map ? map.getBearing() : 0)
-      : point0.bearing;
+      : calmStart.bearing;
 
     let lastFlyCamera: { center: [number, number]; zoom: number; pitch: number; bearing: number } | null = null;
 
@@ -1688,6 +1692,26 @@ export const VideoExportModal: React.FC<VideoExportModalProps> = ({
                           Number (#)
                         </button>
                       </div>
+                    </div>
+
+                    {/* Pin Font Size Control */}
+                    <div className="pt-1 space-y-1.5">
+                      <div className="flex items-center justify-between text-[10px] font-mono text-neutral-400">
+                        <span>PIN FONT SIZE:</span>
+                        <span className="text-amber-400 font-bold">
+                          {currentPinSettings.fontSize ?? DEFAULT_WAYPOINT_FONT_SIZE}px
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min={MIN_WAYPOINT_FONT_SIZE}
+                        max={MAX_WAYPOINT_FONT_SIZE}
+                        step={1}
+                        aria-label="Export waypoint pin font size"
+                        value={currentPinSettings.fontSize ?? DEFAULT_WAYPOINT_FONT_SIZE}
+                        onChange={(e) => handleUpdatePinSettings({ fontSize: parseInt(e.target.value, 10) })}
+                        className="w-full h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-amber-500"
+                      />
                     </div>
 
                     {/* Appear on Approach Switch */}

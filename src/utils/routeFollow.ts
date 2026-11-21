@@ -183,6 +183,139 @@ export function getRoutePointAtProgress(
 }
 
 /**
+ * Interpolates (lng, lat) along track points at a given cumulative distance in km
+ */
+function interpolatePositionAtDist(
+  points: GpxTrackPoint[],
+  targetDist: number
+): { lng: number; lat: number } {
+  if (points.length === 1) {
+    return { lng: points[0].lng, lat: points[0].lat };
+  }
+  const segIdx = findSegmentIndex(points, targetDist);
+  const p1 = points[segIdx];
+  const p2 = points[segIdx + 1];
+  const d1 = p1.distFromStartKm ?? 0;
+  const d2 = p2.distFromStartKm ?? d1;
+  const segLen = d2 - d1;
+  const frac = segLen > 0 ? Math.max(0, Math.min(1, (targetDist - d1) / segLen)) : 0;
+  return {
+    lng: p1.lng + frac * (p2.lng - p1.lng),
+    lat: p1.lat + frac * (p2.lat - p1.lat),
+  };
+}
+
+export interface CalmCameraTarget {
+  lng: number;
+  lat: number;
+  bearing: number;
+}
+
+/**
+ * Computes a heavily stabilized camera center and macro-corridor heading for Calm mode.
+ * - Uses symmetrical multi-point corridor averaging around current progress to filter out
+ *   lateral left/right switchback zig-zags while keeping zero longitudinal lag.
+ * - Uses a wide symmetrical bearing chord (~24% of route span) so minor curves and S-bends
+ *   do not cause left/right camera swaying.
+ */
+export function getCalmRouteTarget(
+  routeData: Pick<GpxRouteData, 'points' | 'coordinates' | 'totalDistanceKm' | 'waypoints'>,
+  progressRatio: number
+): CalmCameraTarget {
+  const base = getRoutePointAtProgress(routeData, progressRatio);
+  const points = routeData.points;
+  if (!points || points.length < 2) {
+    return { lng: base.lng, lat: base.lat, bearing: base.bearing };
+  }
+
+  const totalDist = Math.max(0.001, routeData.totalDistanceKm || points[points.length - 1].distFromStartKm || 1);
+  const clampedProgress = Math.max(0, Math.min(1, Number.isFinite(progressRatio) ? progressRatio : 0));
+  const targetDist = clampedProgress * totalDist;
+
+  // 1. Corridor-averaged camera center (attenuated to exact point at start/end for seamless intro/outro handoff)
+  const edgeFade = Math.min(1, clampedProgress * 10, (1 - clampedProgress) * 10);
+  const corridorHalfSpan = Math.min(totalDist * 0.08, Math.max(0.25, totalDist * 0.045)) * edgeFade;
+
+  let smoothLng = base.lng;
+  let smoothLat = base.lat;
+
+  if (corridorHalfSpan > 0.001) {
+    const sampleSpec: Array<{ offset: number; weight: number }> = [
+      { offset: -1.0, weight: 0.12 },
+      { offset: -0.5, weight: 0.22 },
+      { offset: 0.0, weight: 0.32 },
+      { offset: 0.5, weight: 0.22 },
+      { offset: 1.0, weight: 0.12 },
+    ];
+    let sumLng = 0;
+    let sumLat = 0;
+    for (const s of sampleSpec) {
+      const sampleDist = Math.max(0, Math.min(totalDist, targetDist + s.offset * corridorHalfSpan));
+      const pos = interpolatePositionAtDist(points, sampleDist);
+      sumLng += pos.lng * s.weight;
+      sumLat += pos.lat * s.weight;
+    }
+    smoothLng = sumLng;
+    smoothLat = sumLat;
+  }
+
+  // 2. Wide macro-corridor bearing chord to avoid reacting to tight bends / switchbacks
+  const bearingHalfSpan = Math.min(totalDist * 0.45, Math.min(8.0, Math.max(1.2, totalDist * 0.12)));
+  let fromDist = Math.max(0, targetDist - bearingHalfSpan);
+  let toDist = Math.min(totalDist, targetDist + bearingHalfSpan);
+
+  // Maintain full chord length near start or finish so initial/final headings stay broad and steady
+  const minChord = Math.min(totalDist, bearingHalfSpan * 1.6);
+  if (toDist - fromDist < minChord) {
+    if (fromDist <= 0.0001) {
+      toDist = Math.min(totalDist, minChord);
+    } else if (toDist >= totalDist - 0.0001) {
+      fromDist = Math.max(0, totalDist - minChord);
+    }
+  }
+
+  let macroBearing = base.bearing;
+  if (toDist > fromDist + 0.0001) {
+    const pFrom = interpolatePositionAtDist(points, fromDist);
+    const pTo = interpolatePositionAtDist(points, toDist);
+    macroBearing = calculateBearing(pFrom.lng, pFrom.lat, pTo.lng, pTo.lat);
+  }
+
+  return {
+    lng: smoothLng,
+    lat: smoothLat,
+    bearing: macroBearing,
+  };
+}
+
+/**
+ * Advances camera bearing gently for Calm mode:
+ * - Applies an angular deadband (default 8°) to eliminate minor left/right swaying
+ * - Uses very slow exponential damping (default 0.014)
+ * - Caps maximum angular step per frame (default 0.28°) for cinematic, unhurried rotation
+ */
+export function stepCalmBearing(
+  currentBearing: number,
+  targetBearing: number,
+  options?: { deadbandDeg?: number; damping?: number; maxStepDeg?: number }
+): number {
+  const deadbandDeg = options?.deadbandDeg ?? 8;
+  const damping = options?.damping ?? 0.014;
+  const maxStepDeg = options?.maxStepDeg ?? 0.28;
+
+  const delta = angleDelta(currentBearing, targetBearing);
+  const absDelta = Math.abs(delta);
+  if (absDelta <= deadbandDeg) {
+    return ((currentBearing % 360) + 360) % 360;
+  }
+
+  const excess = Math.sign(delta) * (absDelta - deadbandDeg);
+  const rawStep = excess * damping;
+  const clampedStep = Math.max(-maxStepDeg, Math.min(maxStepDeg, rawStep));
+  return (((currentBearing + clampedStep) % 360) + 360) % 360;
+}
+
+/**
  * Fast lookup for elevation from route data (waypoints or track points) given (lng, lat)
  */
 export function findNearestElevation(

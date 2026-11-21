@@ -8,7 +8,8 @@ import {
   DEFAULT_WAYPOINT_PIN_SETTINGS, 
   computeWaypointsRouteProgress, 
   getWaypointApproachStatus, 
-  WaypointProgressInfo 
+  WaypointProgressInfo,
+  clampWaypointFontSize
 } from './waypointSettings';
 
 export interface ExportResolution {
@@ -864,6 +865,7 @@ export function drawWaypointPinsOnCanvas(
   const baseScale = Math.max(0.65, Math.min(exportWidth, exportHeight) / 1080);
   const sizeMult = pinSettings.pinSize === 'small' ? 0.8 : pinSettings.pinSize === 'large' ? 1.25 : 1.0;
   const scale = baseScale * sizeMult;
+  const configuredFontSize = clampWaypointFontSize(pinSettings.fontSize);
 
   const displayMode = pinSettings.displayMode || 'name';
   const pinStyle = pinSettings.pinStyle || (displayMode === 'name' ? 'badge' : 'classic');
@@ -955,11 +957,12 @@ export function drawWaypointPinsOnCanvas(
       // -------------------------------------------------------------
       // NAME BADGE PILL (Capsule with pin icon, name, and elevation)
       // -------------------------------------------------------------
-      const fontSize = Math.round(12.5 * scale);
+      const fontSize = Math.round(configuredFontSize * baseScale);
+      const eleFontSize = Math.max(8, Math.round(configuredFontSize * 0.82 * baseScale));
       ctx.font = `bold ${fontSize}px -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif`;
 
       let displayName = wpt.name || `Waypoint ${index + 1}`;
-      const maxTextW = 280 * scale;
+      const maxTextW = Math.max(280 * scale, fontSize * 22);
       if (ctx.measureText(displayName).width > maxTextW) {
         while (displayName.length > 3 && ctx.measureText(displayName + '...').width > maxTextW) {
           displayName = displayName.slice(0, -1);
@@ -972,13 +975,13 @@ export function drawWaypointPinsOnCanvas(
       let eleWidth = 0;
       if (pinSettings.showElevation && wpt.ele !== undefined) {
         eleText = `▲ ${wpt.ele}m`;
-        ctx.font = `bold ${Math.round(10 * scale)}px ui-monospace, SFMono-Regular, Menlo, monospace`;
-        eleWidth = ctx.measureText(eleText).width + 12 * scale;
+        ctx.font = `bold ${eleFontSize}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+        eleWidth = ctx.measureText(eleText).width + Math.max(12 * scale, eleFontSize * 1.1);
       }
 
-      const iconDiameter = 18 * scale;
-      const paddingH = 10 * scale;
-      const pillHeight = 28 * scale;
+      const iconDiameter = Math.max(18 * scale, fontSize * 1.25);
+      const paddingH = Math.max(10 * scale, fontSize * 0.75);
+      const pillHeight = Math.max(28 * scale, fontSize * 1.95);
       const pillWidth = paddingH * 2 + iconDiameter + 6 * scale + nameWidth + (eleWidth > 0 ? eleWidth + 5 * scale : 0);
 
       const pillLeft = targetX - pillWidth / 2;
@@ -1060,7 +1063,7 @@ export function drawWaypointPinsOnCanvas(
       // Elevation tag
       if (eleWidth > 0) {
         const eleX = textX + nameWidth + 5 * scale;
-        const eleH = 17 * scale;
+        const eleH = Math.max(17 * scale, eleFontSize * 1.6);
         const eleY = pillTop + (pillHeight - eleH) / 2;
         const eleW = eleWidth;
         const eleR = eleH / 2;
@@ -1078,7 +1081,7 @@ export function drawWaypointPinsOnCanvas(
         ctx.fill();
         ctx.stroke();
 
-        ctx.font = `bold ${Math.round(10 * scale)}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+        ctx.font = `bold ${eleFontSize}px ui-monospace, SFMono-Regular, Menlo, monospace`;
         ctx.fillStyle = '#fbbf24';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
@@ -1089,13 +1092,17 @@ export function drawWaypointPinsOnCanvas(
       // -------------------------------------------------------------
       // BOTH: Name callout box above + circular index pin below
       // -------------------------------------------------------------
-      const calloutFont = Math.round(11 * scale);
+      const calloutFont = Math.round(configuredFontSize * baseScale);
+      const indexFont = Math.max(9, Math.round(configuredFontSize * 0.92 * baseScale));
+      const calloutLabel = (pinSettings.showElevation && wpt.ele !== undefined)
+        ? `${wpt.name} ▲${wpt.ele}m`
+        : wpt.name;
       ctx.font = `bold ${calloutFont}px -apple-system, BlinkMacSystemFont, "Inter", sans-serif`;
-      const nameW = ctx.measureText(wpt.name).width;
-      const calloutW = nameW + 16 * scale;
-      const calloutH = 20 * scale;
+      const nameW = ctx.measureText(calloutLabel).width;
+      const calloutW = nameW + Math.max(16 * scale, calloutFont * 1.3);
+      const calloutH = Math.max(20 * scale, calloutFont * 1.7);
 
-      const pinRadius = 15 * scale;
+      const pinRadius = Math.max(15 * scale, indexFont * 1.15);
       const arrowH = 6 * scale;
       const pinCenterY = targetY - arrowH - pinRadius - 3 * scale;
       const calloutTop = pinCenterY - pinRadius - calloutH - 4 * scale;
@@ -1122,7 +1129,7 @@ export function drawWaypointPinsOnCanvas(
       ctx.fillStyle = '#ffffff';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(wpt.name, targetX, calloutTop + calloutH / 2);
+      ctx.fillText(calloutLabel, targetX, calloutTop + calloutH / 2);
 
       // Circular Index Pin
       ctx.fillStyle = '#0a0a0a';
@@ -1143,7 +1150,7 @@ export function drawWaypointPinsOnCanvas(
       ctx.fill();
 
       // Number in pin
-      ctx.font = `bold ${Math.round(11 * scale)}px ui-monospace, SFMono-Regular, monospace`;
+      ctx.font = `bold ${indexFont}px ui-monospace, SFMono-Regular, monospace`;
       ctx.fillStyle = '#ffffff';
       ctx.fillText(String(index + 1), targetX, pinCenterY);
 
@@ -1163,7 +1170,8 @@ export function drawWaypointPinsOnCanvas(
         ctx.fill();
         ctx.stroke();
       } else {
-        const pinRadius = 15 * scale;
+        const indexFont = Math.max(9, Math.round(configuredFontSize * 0.92 * baseScale));
+        const pinRadius = Math.max(15 * scale, indexFont * 1.15);
         const arrowH = 6 * scale;
         const pinCenterY = targetY - arrowH - pinRadius - 3 * scale;
 
@@ -1195,7 +1203,7 @@ export function drawWaypointPinsOnCanvas(
           ctx.drawImage(imgEl, targetX - pinRadius, pinCenterY - pinRadius, pinRadius * 2, pinRadius * 2);
           ctx.restore();
         } else {
-          ctx.font = `bold ${Math.round(11 * scale)}px ui-monospace, SFMono-Regular, monospace`;
+          ctx.font = `bold ${indexFont}px ui-monospace, SFMono-Regular, monospace`;
           ctx.fillStyle = '#ffffff';
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';

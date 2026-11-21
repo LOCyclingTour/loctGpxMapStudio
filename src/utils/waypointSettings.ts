@@ -4,12 +4,24 @@ export type WaypointDisplayMode = 'name' | 'index' | 'both';
 export type WaypointPinStyle = 'badge' | 'classic' | 'minimal';
 export type WaypointPinSize = 'small' | 'medium' | 'large';
 
+export const MIN_WAYPOINT_FONT_SIZE = 9;
+export const MAX_WAYPOINT_FONT_SIZE = 24;
+export const DEFAULT_WAYPOINT_FONT_SIZE = 12;
+
+export function clampWaypointFontSize(fontSize?: number): number {
+  if (typeof fontSize !== 'number' || !Number.isFinite(fontSize)) {
+    return DEFAULT_WAYPOINT_FONT_SIZE;
+  }
+  return Math.max(MIN_WAYPOINT_FONT_SIZE, Math.min(MAX_WAYPOINT_FONT_SIZE, Math.round(fontSize)));
+}
+
 export interface WaypointPinSettings {
   displayMode: WaypointDisplayMode;
   approachReveal: boolean;
   approachDistanceKm: number; // e.g. 0.8 km
   pinStyle: WaypointPinStyle;
   pinSize: WaypointPinSize;
+  fontSize: number; // px, 9 to 24
   showElevation: boolean;
   stayVisibleAfterArrival: boolean;
 }
@@ -20,6 +32,7 @@ export const DEFAULT_WAYPOINT_PIN_SETTINGS: WaypointPinSettings = {
   approachDistanceKm: 0.8,
   pinStyle: 'badge',
   pinSize: 'medium',
+  fontSize: DEFAULT_WAYPOINT_FONT_SIZE,
   showElevation: true,
   stayVisibleAfterArrival: true,
 };

@@ -2,6 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   DEFAULT_WAYPOINT_PIN_SETTINGS,
+  DEFAULT_WAYPOINT_FONT_SIZE,
+  MIN_WAYPOINT_FONT_SIZE,
+  MAX_WAYPOINT_FONT_SIZE,
+  clampWaypointFontSize,
   computeWaypointsRouteProgress,
   getWaypointApproachStatus,
 } from './waypointSettings.ts';
@@ -12,6 +16,15 @@ test('DEFAULT_WAYPOINT_PIN_SETTINGS has displayMode=name and approachReveal=true
   assert.equal(DEFAULT_WAYPOINT_PIN_SETTINGS.approachReveal, true);
   assert.equal(DEFAULT_WAYPOINT_PIN_SETTINGS.approachDistanceKm, 0.8);
   assert.equal(DEFAULT_WAYPOINT_PIN_SETTINGS.showElevation, true);
+  assert.equal(DEFAULT_WAYPOINT_PIN_SETTINGS.fontSize, DEFAULT_WAYPOINT_FONT_SIZE);
+});
+
+test('clampWaypointFontSize enforces min/max bounds and falls back cleanly', () => {
+  assert.equal(clampWaypointFontSize(undefined), DEFAULT_WAYPOINT_FONT_SIZE);
+  assert.equal(clampWaypointFontSize(Number.NaN), DEFAULT_WAYPOINT_FONT_SIZE);
+  assert.equal(clampWaypointFontSize(4), MIN_WAYPOINT_FONT_SIZE);
+  assert.equal(clampWaypointFontSize(40), MAX_WAYPOINT_FONT_SIZE);
+  assert.equal(clampWaypointFontSize(16.4), 16);
 });
 
 test('computeWaypointsRouteProgress correctly maps waypoints to track progress', () => {

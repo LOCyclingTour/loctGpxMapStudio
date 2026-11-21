@@ -3,7 +3,15 @@ import maplibregl from 'maplibre-gl';
 import { WayfarerMap } from '@wayfarer-gl/core';
 import { GpxRouteData, GpxWaypoint } from '../utils/gpxParser';
 import { zoomToAltitude, altitudeToZoom, formatAltitude } from '../utils/cameraMath';
-import { getRoutePointAtProgress, findNearestElevation, angleDelta, interpolateAngle, calculateBearing } from '../utils/routeFollow';
+import {
+  getRoutePointAtProgress,
+  getCalmRouteTarget,
+  stepCalmBearing,
+  findNearestElevation,
+  angleDelta,
+  interpolateAngle,
+  calculateBearing
+} from '../utils/routeFollow';
 import { UserButton } from '@clerk/react';
 import { resolveBasemapStyle } from '../utils/basemapStyles';
 import { 
@@ -36,7 +44,8 @@ import {
   WaypointPinSettings, 
   DEFAULT_WAYPOINT_PIN_SETTINGS, 
   computeWaypointsRouteProgress, 
-  getWaypointApproachStatus 
+  getWaypointApproachStatus,
+  clampWaypointFontSize
 } from '../utils/waypointSettings';
 
 function escapeHtml(str: string): string {
@@ -425,30 +434,37 @@ export const MapViewer = React.forwardRef<MapViewerHandle, MapViewerProps>(({
         ? (cameraSettings.pitch !== undefined ? cameraSettings.pitch : 55)
         : 0;
 
-      let targetLng = pointInfo.lng;
-      let targetLat = pointInfo.lat;
+      const calmTarget = activeMode === 'calm'
+        ? getCalmRouteTarget(routeData, progress)
+        : null;
+
+      let targetLng = calmTarget ? calmTarget.lng : pointInfo.lng;
+      let targetLat = calmTarget ? calmTarget.lat : pointInfo.lat;
       let targetBearing = currentBearing;
 
       if (snapImmediately) {
         // Immediate snap (on slider scrub, initial play start, or frame 0 of video export)
-        targetLng = pointInfo.lng;
-        targetLat = pointInfo.lat;
-        if (activeMode === 'calm') {
-          targetBearing = pointInfo.bearing;
+        targetLng = calmTarget ? calmTarget.lng : pointInfo.lng;
+        targetLat = calmTarget ? calmTarget.lat : pointInfo.lat;
+        if (activeMode === 'calm' && calmTarget) {
+          targetBearing = calmTarget.bearing;
         }
       } else {
         // Smooth damped movement during playback or video export:
-        // Position damping (12% catchup) absorbs micro-wiggles on real GPS tracks
-        const posDamping = 0.12;
-        const dLng = pointInfo.lng - currentCenter.lng;
-        const dLat = pointInfo.lat - currentCenter.lat;
+        // Calm mode uses gentler position damping (0.06) chasing the corridor-smoothed path
+        // to greatly reduce left/right zig-zag panning while keeping the traveler smoothly centered.
+        const posDamping = activeMode === 'calm' ? 0.06 : 0.1;
+        const desiredLng = calmTarget ? calmTarget.lng : pointInfo.lng;
+        const desiredLat = calmTarget ? calmTarget.lat : pointInfo.lat;
+        const dLng = desiredLng - currentCenter.lng;
+        const dLat = desiredLat - currentCenter.lat;
         targetLng = currentCenter.lng + dLng * posDamping;
         targetLat = currentCenter.lat + dLat * posDamping;
 
-        if (activeMode === 'calm') {
-          // Smooth rotation without deadband freezing:
-          // 0.04 damping (~0.35s stabilization) provides silky, stabilized turns that follow the trail heading
-          targetBearing = interpolateAngle(currentBearing, pointInfo.bearing, 0.04);
+        if (activeMode === 'calm' && calmTarget) {
+          // Ultra-calm rotation: deadband + very slow damping + angular speed cap
+          // eliminates distracting left/right swaying on curves and switchbacks
+          targetBearing = stepCalmBearing(currentBearing, calmTarget.bearing);
         } else {
           // 'fixed' mode: maintain current compass orientation without spinning
           targetBearing = currentBearing;
@@ -627,6 +643,9 @@ export const MapViewer = React.forwardRef<MapViewerHandle, MapViewerProps>(({
 
     const wptProgressMap = computeWaypointsRouteProgress(routeData);
     const pinSize = pinSettings.pinSize || 'medium';
+    const pinFontSize = clampWaypointFontSize(pinSettings.fontSize);
+    const eleFontSize = Math.max(8, Math.round(pinFontSize * 0.82));
+    const indexFontSize = Math.max(9, Math.round(pinFontSize * 0.92));
     const displayMode = pinSettings.displayMode || 'name';
     const pinStyle = pinSettings.pinStyle || (displayMode === 'name' ? 'badge' : 'classic');
     const isApproach = Boolean(pinSettings.approachReveal);
@@ -634,6 +653,9 @@ export const MapViewer = React.forwardRef<MapViewerHandle, MapViewerProps>(({
     routeData.waypoints.forEach((wpt, index) => {
       const distInfo = wptProgressMap.get(wpt.id) || { distFromStartKm: 0, progressRatio: 0 };
       const pinEl = document.createElement('div');
+      pinEl.style.setProperty('--wpt-font-size', `${pinFontSize}px`);
+      pinEl.style.setProperty('--wpt-ele-font-size', `${eleFontSize}px`);
+      pinEl.style.setProperty('--wpt-index-font-size', `${indexFontSize}px`);
 
       const initialStatus = isApproach
         ? getWaypointApproachStatus(
@@ -679,7 +701,7 @@ export const MapViewer = React.forwardRef<MapViewerHandle, MapViewerProps>(({
         `;
       } else if (displayMode === 'both') {
         const calloutEle = (pinSettings.showElevation && wpt.ele !== undefined)
-          ? ` <span style="color:#fbbf24; font-size:10px; margin-left:3px;">▲${wpt.ele}m</span>`
+          ? ` <span style="color:#fbbf24; font-size:${eleFontSize}px; margin-left:3px;">▲${wpt.ele}m</span>`
           : '';
 
         pinEl.innerHTML = `
@@ -1162,9 +1184,10 @@ export const MapViewer = React.forwardRef<MapViewerHandle, MapViewerProps>(({
     const initialFlyPitch = cameraSettings.is3dTerrain
       ? (cameraSettings.pitch !== undefined ? cameraSettings.pitch : 55)
       : 0;
+    const calmStart = getCalmRouteTarget(routeData, 0);
     const initialFlyBearing = followMode === 'fixed'
       ? (mapRef.current?.getBearing() ?? cameraSettings.bearing ?? 0)
-      : point0.bearing;
+      : calmStart.bearing;
 
     let startTime: number | null = null;
     let isFirstFlythrough = true;
@@ -1423,7 +1446,7 @@ export const MapViewer = React.forwardRef<MapViewerHandle, MapViewerProps>(({
         <div className="flex items-center justify-center px-3.5 py-2.5 rounded-xl bg-neutral-900/90 hover:bg-neutral-800 text-white shadow-2xl backdrop-blur-md border border-neutral-700/80 transition-all hover:border-amber-400/70">
           <UserButton />
         </div>
-        
+                
         {/* Fit to Route Primary Button */}
         <button
           onClick={fitRouteBounds}

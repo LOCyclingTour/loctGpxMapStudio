@@ -51,27 +51,27 @@
   transform-origin: bottom center;
 }
 .custom-wpt-marker-wrap.size-small .pin-inner {
-  width: 26px;
-  height: 26px;
+  width: max(26px, calc(var(--wpt-index-font-size, 11px) * 2.1));
+  height: max(26px, calc(var(--wpt-index-font-size, 11px) * 2.1));
 }
 .custom-wpt-marker-wrap.size-small .pin-index {
-  font-size: 9.5px;
+  font-size: var(--wpt-index-font-size, 10px);
 }
 .custom-wpt-marker-wrap.size-small .wpt-badge-pill {
   padding: 3px 8px;
-  font-size: 11px;
+  font-size: var(--wpt-font-size, 12px);
 }
 
 .custom-wpt-marker-wrap.size-large .pin-inner {
-  width: 38px;
-  height: 38px;
+  width: max(38px, calc(var(--wpt-index-font-size, 11px) * 2.5));
+  height: max(38px, calc(var(--wpt-index-font-size, 11px) * 2.5));
 }
 .custom-wpt-marker-wrap.size-large .pin-index {
-  font-size: 13px;
+  font-size: var(--wpt-index-font-size, 13px);
 }
 .custom-wpt-marker-wrap.size-large .wpt-badge-pill {
   padding: 6px 14px;
-  font-size: 13px;
+  font-size: var(--wpt-font-size, 12px);
 }
 
 /* Badge Pill (Name Display Mode) */
@@ -82,15 +82,15 @@
   background: rgba(13, 15, 20, 0.94);
   border: 1.5px solid #f59e0b;
   border-radius: 9999px;
-  padding: 4px 10px;
+  padding: 0.35em 0.85em;
   font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
-  font-size: 12px;
+  font-size: var(--wpt-font-size, 12px);
   font-weight: 700;
   color: #f9fafb;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.7), 0 0 12px rgba(245, 158, 11, 0.25);
   backdrop-filter: blur(8px);
   white-space: nowrap;
-  max-width: 260px;
+  max-width: max(260px, calc(var(--wpt-font-size, 12px) * 22));
   transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275), border-color 0.2s;
   z-index: 2;
 }
@@ -101,8 +101,8 @@
 }
 
 .wpt-badge-pill .wpt-pill-icon {
-  width: 14px;
-  height: 14px;
+  width: max(14px, 1.1em);
+  height: max(14px, 1.1em);
   flex-shrink: 0;
   color: #f59e0b;
 }
@@ -116,7 +116,7 @@
 
 .wpt-badge-pill .wpt-pill-ele {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 10px;
+  font-size: var(--wpt-ele-font-size, 10px);
   font-weight: 600;
   color: #fbbf24;
   background: rgba(245, 158, 11, 0.16);
@@ -128,7 +128,7 @@
 
 .wpt-badge-pill .wpt-pill-idx {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 10px;
+  font-size: var(--wpt-ele-font-size, 10px);
   font-weight: 700;
   color: #94a3b8;
   margin-right: -2px;
@@ -139,12 +139,12 @@
   background: rgba(10, 10, 10, 0.92);
   border: 1px solid rgba(245, 158, 11, 0.6);
   border-radius: 6px;
-  padding: 2px 7px;
-  font-size: 11px;
+  padding: 0.2em 0.65em;
+  font-size: var(--wpt-font-size, 11px);
   font-weight: 700;
   color: #ffffff;
   white-space: nowrap;
-  max-width: 220px;
+  max-width: max(220px, calc(var(--wpt-font-size, 12px) * 20));
   overflow: hidden;
   text-overflow: ellipsis;
   box-shadow: 0 4px 10px rgba(0, 0, 0, 0.6);
@@ -171,8 +171,8 @@
 }
 
 .custom-wpt-pin .pin-inner {
-  width: 32px;
-  height: 32px;
+  width: max(32px, calc(var(--wpt-index-font-size, 11px) * 2.3));
+  height: max(32px, calc(var(--wpt-index-font-size, 11px) * 2.3));
   border-radius: 9999px;
   background-color: #0a0a0a;
   border: 2.5px solid #f59e0b;
@@ -207,7 +207,7 @@
 
 .custom-wpt-pin .pin-index {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 11px;
+  font-size: var(--wpt-index-font-size, 11px);
   font-weight: 800;
   color: #ffffff;
 }

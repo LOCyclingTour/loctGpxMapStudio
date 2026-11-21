@@ -5,6 +5,8 @@ import {
   angleDelta,
   interpolateAngle,
   getRoutePointAtProgress,
+  getCalmRouteTarget,
+  stepCalmBearing,
   findNearestElevation,
 } from './routeFollow.ts';
 
@@ -102,4 +104,53 @@ test('findNearestElevation looks up exact waypoint elevation and falls back to t
   // Null routeData returns null
   assert.equal(findNearestElevation(12.0, 47.0, null), null);
 });
+
+test('getCalmRouteTarget smooths out lateral zig-zag sway while keeping start exact', () => {
+  // Zig-zagging northbound route oscillating east/west in longitude
+  const zigzagRoute = {
+    points: [
+      { lat: 47.00, lng: 12.00, distFromStartKm: 0 },
+      { lat: 47.02, lng: 12.02, distFromStartKm: 3 },
+      { lat: 47.04, lng: 11.98, distFromStartKm: 6 },
+      { lat: 47.06, lng: 12.02, distFromStartKm: 9 },
+      { lat: 47.08, lng: 11.98, distFromStartKm: 12 },
+      { lat: 47.10, lng: 12.00, distFromStartKm: 15 },
+    ],
+    coordinates: [
+      [12.00, 47.00],
+      [12.02, 47.02],
+      [11.98, 47.04],
+      [12.02, 47.06],
+      [11.98, 47.08],
+      [12.00, 47.10],
+    ] as [number, number][],
+    totalDistanceKm: 15,
+    waypoints: [],
+  };
+
+  // Start point should remain exact for intro dive-in handoff
+  const start = getCalmRouteTarget(zigzagRoute, 0);
+  assert.equal(start.lng, 12.00);
+  assert.equal(start.lat, 47.00);
+
+  // At a zig-zag peak (progress 0.4 -> dist 6km, raw lng = 11.98), calm target should pull closer to centerline 12.00
+  const rawMid = getRoutePointAtProgress(zigzagRoute, 0.4);
+  const calmMid = getCalmRouteTarget(zigzagRoute, 0.4);
+  assert.ok(Math.abs(calmMid.lng - 12.00) < Math.abs(rawMid.lng - 12.00));
+});
+
+test('stepCalmBearing ignores small deviations inside deadband and caps rotation speed', () => {
+  // Within 8° deadband: no left/right movement at all
+  assert.equal(stepCalmBearing(90, 96), 90);
+  assert.equal(stepCalmBearing(90, 83), 90);
+
+  // Beyond deadband with huge turn (90° -> 180°): movement is strictly capped at 0.28°
+  const next = stepCalmBearing(90, 180);
+  assert.ok(next > 90 && next <= 90.281);
+
+  // Wrap-around across 360°/0° going counter-clockwise
+  const wrapped = stepCalmBearing(1, 270);
+  assert.ok(wrapped >= 0.71 && wrapped < 1);
+});
+
 

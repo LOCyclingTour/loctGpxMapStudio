@@ -32,7 +32,13 @@ import {
   Tag
 } from 'lucide-react';
 import { TvBannerPartsConfig, DEFAULT_TV_BANNER_PARTS } from '../utils/videoExporter';
-import { WaypointPinSettings, DEFAULT_WAYPOINT_PIN_SETTINGS } from '../utils/waypointSettings';
+import {
+  WaypointPinSettings,
+  DEFAULT_WAYPOINT_PIN_SETTINGS,
+  MIN_WAYPOINT_FONT_SIZE,
+  MAX_WAYPOINT_FONT_SIZE,
+  DEFAULT_WAYPOINT_FONT_SIZE
+} from '../utils/waypointSettings';
 
 interface RouteControlsDrawerProps {
   routeData: GpxRouteData | null;
@@ -1013,6 +1019,42 @@ export const RouteControlsDrawer: React.FC<RouteControlsDrawerProps> = ({
                       <span>▲ Show Ele</span>
                       {currentPinSettings.showElevation && <Check className="w-3 h-3" />}
                     </button>
+                  </div>
+                </div>
+
+                {/* Pin Font Size Slider & Presets */}
+                <div className="pt-2 border-t border-neutral-800/80 space-y-2">
+                  <div className="flex items-center justify-between text-[10px] font-mono text-neutral-400">
+                    <span className="uppercase">Pin Font Size</span>
+                    <span className="text-amber-400 font-bold">
+                      {currentPinSettings.fontSize ?? DEFAULT_WAYPOINT_FONT_SIZE}px
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min={MIN_WAYPOINT_FONT_SIZE}
+                    max={MAX_WAYPOINT_FONT_SIZE}
+                    step={1}
+                    aria-label="Waypoint pin font size"
+                    value={currentPinSettings.fontSize ?? DEFAULT_WAYPOINT_FONT_SIZE}
+                    onChange={(e) => handleUpdatePinSettings({ fontSize: parseInt(e.target.value, 10) })}
+                    className="w-full h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-amber-500"
+                  />
+                  <div className="grid grid-cols-4 gap-1">
+                    {[10, 12, 16, 20].map((px) => (
+                      <button
+                        key={px}
+                        type="button"
+                        onClick={() => handleUpdatePinSettings({ fontSize: px })}
+                        className={`py-1 rounded border text-[10px] font-mono transition-colors cursor-pointer ${
+                          (currentPinSettings.fontSize ?? DEFAULT_WAYPOINT_FONT_SIZE) === px
+                            ? 'bg-amber-500/20 border-amber-500/50 text-amber-300 font-bold'
+                            : 'bg-neutral-950 border-neutral-800 text-neutral-400 hover:text-white'
+                        }`}
+                      >
+                        {px}px
+                      </button>
+                    ))}
                   </div>
                 </div>
               </div>
