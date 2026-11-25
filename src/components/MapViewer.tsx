@@ -7,6 +7,7 @@ import {
   getRoutePointAtProgress,
   getCalmRouteTarget,
   stepCalmBearing,
+  buildProgressRouteGeoJson,
   findNearestElevation,
   angleDelta,
   interpolateAngle,
@@ -145,10 +146,15 @@ export const MapViewer = React.forwardRef<MapViewerHandle, MapViewerProps>(({
   // Animation & Camera follow state
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackProgress, setPlaybackProgress] = useState(0); // 0 to 1
+  const playbackProgressRef = useRef<number>(0);
   const [followMode, setFollowMode] = useState<FollowCamMode>('calm');
   const [outroRoseVisible, setOutroRoseVisible] = useState<{ active: boolean; progress: number; color?: string } | null>(null);
   const animFrameRef = useRef<number | null>(null);
   const lastFlyCameraRef = useRef<{ center: [number, number]; zoom: number; pitch: number; bearing: number } | null>(null);
+
+  useEffect(() => {
+    playbackProgressRef.current = playbackProgress;
+  }, [playbackProgress]);
 
   // Get line dash array configuration
   const getDashArray = useCallback((dashType: 'solid' | 'dashed' | 'dotted'): number[] | undefined => {
@@ -305,8 +311,8 @@ export const MapViewer = React.forwardRef<MapViewerHandle, MapViewerProps>(({
     }
   }, [lineStyle.color, routeData]);
 
-  // Clean up all markers, popups, and traveler layers
-  const cleanupMarkers = useCallback(() => {
+  // Clean up only DOM waypoint markers (without tearing down WebGL traveler layers)
+  const cleanupWaypointMarkers = useCallback(() => {
     markersRef.current.forEach((marker) => {
       try {
         marker.remove();
@@ -315,6 +321,11 @@ export const MapViewer = React.forwardRef<MapViewerHandle, MapViewerProps>(({
       }
     });
     markersRef.current = [];
+  }, []);
+
+  // Clean up all markers, popups, and traveler layers (full teardown)
+  const cleanupMarkers = useCallback(() => {
+    cleanupWaypointMarkers();
 
     if (travelerMarkerRef.current) {
       try {
@@ -337,7 +348,23 @@ export const MapViewer = React.forwardRef<MapViewerHandle, MapViewerProps>(({
         // Ignore
       }
     }
-  }, []);
+  }, [cleanupWaypointMarkers]);
+
+  // Update the WebGL progress-source line directly using exact cumulative route distance
+  // (bypasses Wayfarer's waypoint-index interpolation so the drawn path stays 100% synced with video & beacon)
+  const updateProgressLineSource = useCallback((overallProgress: number) => {
+    const map = mapRef.current;
+    const activeRoute = routeDataRef.current || routeData;
+    if (!map || !activeRoute || activeRoute.coordinates.length < 2) return;
+    try {
+      const progressSource = map.getSource('progress-source') as maplibregl.GeoJSONSource | undefined;
+      if (progressSource && typeof progressSource.setData === 'function') {
+        progressSource.setData(buildProgressRouteGeoJson(activeRoute, overallProgress) as any);
+      }
+    } catch (e) {
+      // Ignore if map style is mid-reload
+    }
+  }, [routeData]);
 
   // Render or update the active traveler navigation beacon directly on the route in WebGL
   // Using native WebGL circle layers ensures exact 3D terrain elevation clamping and alignment with the route line
@@ -521,8 +548,10 @@ export const MapViewer = React.forwardRef<MapViewerHandle, MapViewerProps>(({
     try {
       const effectiveColor = color || lineStyle.color;
       const effectiveWidth = Math.max(lineStyle.width + (color ? widthBonus : 0), 2);
+      const baseTrackOpacity = color ? lineStyle.opacity : Math.max(0.22, lineStyle.opacity * 0.3);
       if (map.getLayer('route-layer')) {
         map.setPaintProperty('route-layer', 'line-color', effectiveColor);
+        map.setPaintProperty('route-layer', 'line-opacity', baseTrackOpacity);
       }
       if (map.getLayer('progress-layer')) {
         map.setPaintProperty('progress-layer', 'line-color', effectiveColor);
@@ -552,14 +581,25 @@ export const MapViewer = React.forwardRef<MapViewerHandle, MapViewerProps>(({
     },
     getMap: () => mapRef.current,
     updateProgress: (segmentIndex: number, progress: number, overallProgress?: number, shouldMoveCamera: boolean = true) => {
-      wayfarerRef.current?.updateProgress(segmentIndex, progress);
-      const computedOverall = overallProgress !== undefined
-        ? overallProgress
-        : (routeData ? (segmentIndex + progress) / Math.max(1, (routeData.waypoints?.length || 2) - 1) : 0);
+      const computedOverall = Math.max(
+        0,
+        Math.min(
+          1,
+          overallProgress !== undefined
+            ? overallProgress
+            : (routeData ? (segmentIndex + progress) / Math.max(1, (routeData.waypoints?.length || 2) - 1) : progress)
+        )
+      );
+      playbackProgressRef.current = computedOverall;
       setPlaybackProgress(computedOverall);
+      updateProgressLineSource(computedOverall);
       if (shouldMoveCamera) {
         moveCameraToRouteProgress(computedOverall);
       } else {
+        if (routeData && routeData.coordinates.length > 0) {
+          const pt = getRoutePointAtProgress(routeData, computedOverall);
+          renderTravelerMarker(pt.lng, pt.lat, pt.ele);
+        }
         updateWaypointApproach(computedOverall);
       }
     },
@@ -570,7 +610,7 @@ export const MapViewer = React.forwardRef<MapViewerHandle, MapViewerProps>(({
     setFollowMode: (mode: FollowCamMode) => setFollowMode(mode),
     setLineColorOverride,
     getBoundsCamera,
-  }), [setAltitude, setPitch, setBearing, fitRouteBounds, moveCameraToRouteProgress, routeData, followMode, setLineColorOverride, getBoundsCamera]);
+  }), [setAltitude, setPitch, setBearing, fitRouteBounds, moveCameraToRouteProgress, updateProgressLineSource, renderTravelerMarker, updateWaypointApproach, routeData, followMode, setLineColorOverride, getBoundsCamera]);
 
   // Apply or remove 3D Terrain DEM mesh
   const applyTerrain = useCallback((map: maplibregl.Map, enabled: boolean, exaggeration: number) => {
@@ -639,7 +679,7 @@ export const MapViewer = React.forwardRef<MapViewerHandle, MapViewerProps>(({
     const map = mapRef.current;
     if (!map || !routeData) return;
 
-    cleanupMarkers();
+    cleanupWaypointMarkers();
 
     const wptProgressMap = computeWaypointsRouteProgress(routeData);
     const pinSize = pinSettings.pinSize || 'medium';
@@ -653,13 +693,14 @@ export const MapViewer = React.forwardRef<MapViewerHandle, MapViewerProps>(({
     routeData.waypoints.forEach((wpt, index) => {
       const distInfo = wptProgressMap.get(wpt.id) || { distFromStartKm: 0, progressRatio: 0 };
       const pinEl = document.createElement('div');
+      pinEl.style.setProperty('--wpt-accent-color', lineStyle.color);
       pinEl.style.setProperty('--wpt-font-size', `${pinFontSize}px`);
       pinEl.style.setProperty('--wpt-ele-font-size', `${eleFontSize}px`);
       pinEl.style.setProperty('--wpt-index-font-size', `${indexFontSize}px`);
 
       const initialStatus = isApproach
         ? getWaypointApproachStatus(
-            playbackProgress,
+            playbackProgressRef.current,
             distInfo.distFromStartKm,
             routeData.totalDistanceKm,
             pinSettings.approachDistanceKm ?? 0.8,
@@ -701,7 +742,7 @@ export const MapViewer = React.forwardRef<MapViewerHandle, MapViewerProps>(({
         `;
       } else if (displayMode === 'both') {
         const calloutEle = (pinSettings.showElevation && wpt.ele !== undefined)
-          ? ` <span style="color:#fbbf24; font-size:${eleFontSize}px; margin-left:3px;">▲${wpt.ele}m</span>`
+          ? ` <span style="color:var(--wpt-accent-color, ${lineStyle.color}); font-size:${eleFontSize}px; margin-left:3px;">▲${wpt.ele}m</span>`
           : '';
 
         pinEl.innerHTML = `
@@ -826,7 +867,7 @@ export const MapViewer = React.forwardRef<MapViewerHandle, MapViewerProps>(({
 
       markersRef.current.push(marker);
     });
-  }, [routeData, lineStyle.color, pinSettings, playbackProgress, cleanupMarkers, onSelectWaypoint, onUpdateWaypointPhoto]);
+  }, [routeData, lineStyle.color, pinSettings, cleanupWaypointMarkers, onSelectWaypoint, onUpdateWaypointPhoto]);
 
   // Setup Camera Listeners to report live Altitude, Pitch, Bearing to parent
   const attachCameraListeners = useCallback((map: maplibregl.Map) => {
@@ -852,10 +893,11 @@ export const MapViewer = React.forwardRef<MapViewerHandle, MapViewerProps>(({
   // Helper to sync line and traveler paint properties on the map
   const syncLinePaintProperties = useCallback((map: maplibregl.Map) => {
     try {
+      const untraveledOpacity = Math.max(0.22, lineStyle.opacity * 0.3);
       if (map.getLayer('route-layer')) {
         map.setPaintProperty('route-layer', 'line-color', lineStyle.color);
         map.setPaintProperty('route-layer', 'line-width', lineStyle.width);
-        map.setPaintProperty('route-layer', 'line-opacity', lineStyle.opacity);
+        map.setPaintProperty('route-layer', 'line-opacity', untraveledOpacity);
 
         const dashArray = getDashArray(lineStyle.dashType);
         if (dashArray) {
@@ -957,7 +999,7 @@ export const MapViewer = React.forwardRef<MapViewerHandle, MapViewerProps>(({
         paint: {
           'line-color': lineStyle.color,
           'line-width': lineStyle.width,
-          'line-opacity': lineStyle.opacity,
+          'line-opacity': Math.max(0.22, lineStyle.opacity * 0.3),
           ...(dashArray ? { 'line-dasharray': dashArray } : {}),
         },
       },
@@ -987,8 +1029,9 @@ export const MapViewer = React.forwardRef<MapViewerHandle, MapViewerProps>(({
         applyTerrain(mapInstance, cameraSettings.is3dTerrain, cameraSettings.terrainExaggeration);
         initTravelerLayers(mapInstance);
         renderWaypointMarkers();
+        updateProgressLineSource(playbackProgressRef.current);
         fitRouteBounds();
-        moveCameraToRouteProgress(playbackProgress, false);
+        moveCameraToRouteProgress(playbackProgressRef.current, false);
         attachCameraListeners(mapInstance);
       },
     });
@@ -1019,15 +1062,8 @@ export const MapViewer = React.forwardRef<MapViewerHandle, MapViewerProps>(({
         applyTerrain(nativeMap, cameraSettings.is3dTerrain, cameraSettings.terrainExaggeration);
         if (wayfarerRef.current) {
           (wayfarerRef.current as any).addLayers?.();
-          const numWaypoints = Math.max(2, routeData.waypoints.length);
-          const totalSegments = numWaypoints - 1;
-          const currentSegment = Math.min(
-            totalSegments - 1,
-            Math.floor(playbackProgress * totalSegments)
-          );
-          const segmentProgress = (playbackProgress * totalSegments) % 1;
-          wayfarerRef.current.updateProgress(currentSegment, segmentProgress);
         }
+        updateProgressLineSource(playbackProgressRef.current);
         syncLinePaintProperties(nativeMap);
         initTravelerLayers(nativeMap);
         renderWaypointMarkers();
@@ -1201,19 +1237,9 @@ export const MapViewer = React.forwardRef<MapViewerHandle, MapViewerProps>(({
         const progressDelta = elapsedSeconds / baseFlythroughSeconds;
         const current = (initialPlayback + progressDelta) % 1;
 
+        playbackProgressRef.current = current;
         setPlaybackProgress(current);
-
-        if (wayfarerRef.current) {
-          const numWaypoints = Math.max(2, routeData.waypoints.length);
-          const totalSegments = numWaypoints - 1;
-          const currentSegment = Math.min(
-            totalSegments - 1,
-            Math.floor(current * totalSegments)
-          );
-          const segmentProgress = (current * totalSegments) % 1;
-
-          wayfarerRef.current.updateProgress(currentSegment, segmentProgress);
-        }
+        updateProgressLineSource(current);
 
         // Smoothly drive map camera and active traveler beacon along the route path
         moveCameraToRouteProgress(current);
@@ -1233,11 +1259,14 @@ export const MapViewer = React.forwardRef<MapViewerHandle, MapViewerProps>(({
       if (timeline.phase === 'ended') {
         setIsPlaying(false);
         setLineColorOverride(null);
+        playbackProgressRef.current = 1;
         setPlaybackProgress(1);
+        updateProgressLineSource(1);
         return;
       }
 
       const map = mapRef.current;
+      playbackProgressRef.current = timeline.routeProgress;
       setPlaybackProgress(timeline.routeProgress);
 
       if (timeline.phase === 'intro') {
@@ -1256,22 +1285,12 @@ export const MapViewer = React.forwardRef<MapViewerHandle, MapViewerProps>(({
           map.jumpTo(cam);
         }
         renderTravelerMarker(point0.lng, point0.lat, point0.ele);
-        if (wayfarerRef.current) {
-          wayfarerRef.current.updateProgress(0, 0);
-        }
+        updateProgressLineSource(0);
+        updateWaypointApproach(0);
       } else if (timeline.phase === 'flythrough') {
         setLineColorOverride(null);
         setOutroRoseVisible(null);
-        if (wayfarerRef.current) {
-          const numWaypoints = Math.max(2, routeData.waypoints.length);
-          const totalSegments = numWaypoints - 1;
-          const currentSegment = Math.min(
-            totalSegments - 1,
-            Math.floor(timeline.routeProgress * totalSegments)
-          );
-          const segmentProgress = (timeline.routeProgress * totalSegments) % 1;
-          wayfarerRef.current.updateProgress(currentSegment, segmentProgress);
-        }
+        updateProgressLineSource(timeline.routeProgress);
         moveCameraToRouteProgress(timeline.routeProgress, isFirstFlythrough);
         isFirstFlythrough = false;
 
@@ -1318,11 +1337,9 @@ export const MapViewer = React.forwardRef<MapViewerHandle, MapViewerProps>(({
         if (map) {
           map.jumpTo(cam);
         }
-        if (wayfarerRef.current) {
-          const totalSegments = Math.max(1, routeData.waypoints.length - 1);
-          wayfarerRef.current.updateProgress(totalSegments - 1, 1);
-        }
-        renderTravelerMarker(finishCoord[0], finishCoord[1], finishBearing);
+        updateProgressLineSource(1);
+        updateWaypointApproach(1);
+        renderTravelerMarker(finishCoord[0], finishCoord[1], routeData.points[routeData.points.length - 1]?.ele);
       } else if (timeline.phase === 'outro-hold') {
         if (isOutroRoseActive(cfg)) {
           setOutroRoseVisible({
@@ -1340,6 +1357,7 @@ export const MapViewer = React.forwardRef<MapViewerHandle, MapViewerProps>(({
             pitch: overviewPitch,
           });
         }
+        updateProgressLineSource(1);
         if (timeline.animatedLineColor) {
           setLineColorOverride(timeline.animatedLineColor, timeline.lineWidthBonus);
         }
@@ -1361,6 +1379,8 @@ export const MapViewer = React.forwardRef<MapViewerHandle, MapViewerProps>(({
     isPlaying,
     routeData,
     moveCameraToRouteProgress,
+    updateProgressLineSource,
+    updateWaypointApproach,
     cinematicIntroOutro,
     cameraSettings.is3dTerrain,
     cameraSettings.pitch,
@@ -1372,17 +1392,9 @@ export const MapViewer = React.forwardRef<MapViewerHandle, MapViewerProps>(({
 
   const handleManualScrub = (newProgress: number) => {
     setLineColorOverride(null);
+    playbackProgressRef.current = newProgress;
     setPlaybackProgress(newProgress);
-    if (wayfarerRef.current && routeData) {
-      const numWaypoints = Math.max(2, routeData.waypoints.length);
-      const totalSegments = numWaypoints - 1;
-      const currentSegment = Math.min(
-        totalSegments - 1,
-        Math.floor(newProgress * totalSegments)
-      );
-      const segmentProgress = (newProgress * totalSegments) % 1;
-      wayfarerRef.current.updateProgress(currentSegment, segmentProgress);
-    }
+    updateProgressLineSource(newProgress);
     // Update map camera & traveler marker to scrubbed position immediately
     moveCameraToRouteProgress(newProgress, true);
   };

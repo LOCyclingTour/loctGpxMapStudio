@@ -9,6 +9,7 @@ import {
   drawOutroCompassRoseOnCanvas,
   isPointInFrontOfCamera,
   drawWaypointPinsOnCanvas,
+  colorWithAlpha,
 } from './videoExporter.ts';
 import { DEFAULT_WAYPOINT_PIN_SETTINGS } from './waypointSettings.ts';
 
@@ -204,5 +205,91 @@ test('drawWaypointPinsOnCanvas handles empty, null or valid route data without e
 
   assert.ok(true);
 });
+
+test('colorWithAlpha converts hex and rgb colors accurately', () => {
+  assert.equal(colorWithAlpha('#ec4899', 0.5), 'rgba(236, 72, 153, 0.5)');
+  assert.equal(colorWithAlpha('#f0a', 0.25), 'rgba(255, 0, 170, 0.25)');
+  assert.equal(colorWithAlpha('rgb(236, 72, 153)', 0.8), 'rgba(236, 72, 153, 0.8)');
+  assert.equal(colorWithAlpha('hotpink', 0.4), 'hotpink');
+});
+
+test('drawWaypointPinsOnCanvas honors custom pink accentColor instead of hardcoded yellow', () => {
+  const usedColors: string[] = [];
+  const makeTrackedCtx = () => {
+    let _fill: any = '';
+    let _stroke: any = '';
+    let _shadow: any = '';
+    return {
+      get fillStyle() { return _fill; },
+      set fillStyle(v: any) { _fill = v; if (typeof v === 'string') usedColors.push(v); },
+      get strokeStyle() { return _stroke; },
+      set strokeStyle(v: any) { _stroke = v; if (typeof v === 'string') usedColors.push(v); },
+      get shadowColor() { return _shadow; },
+      set shadowColor(v: any) { _shadow = v; if (typeof v === 'string') usedColors.push(v); },
+      save: () => {},
+      restore: () => {},
+      beginPath: () => {},
+      arc: () => {},
+      fill: () => {},
+      stroke: () => {},
+      moveTo: () => {},
+      lineTo: () => {},
+      closePath: () => {},
+      fillText: () => {},
+      measureText: (text: string) => ({ width: text.length * 8 }),
+    };
+  };
+
+  const mockMap = {
+    getCanvas: () => ({ clientWidth: 1920, clientHeight: 1080 }),
+    transform: { width: 1920, height: 1080 },
+    project: () => ({ x: 500, y: 400 }),
+  };
+
+  const mockRoute = {
+    name: 'Pink Route',
+    totalDistanceKm: 10,
+    totalDistanceMiles: 6.2,
+    elevationGainM: 350,
+    elevationLossM: 350,
+    maxElevationM: 1200,
+    minElevationM: 850,
+    points: [
+      { lat: 45.0, lng: 10.0, ele: 900, distFromStartKm: 0 },
+      { lat: 45.1, lng: 10.1, ele: 1200, distFromStartKm: 5 },
+      { lat: 45.2, lng: 10.2, ele: 1000, distFromStartKm: 10 },
+    ],
+    coordinates: [[10.0, 45.0], [10.1, 45.1], [10.2, 45.2]],
+    waypoints: [
+      { id: 'wpt-1', name: 'Pink Summit', lat: 45.1, lng: 10.1, ele: 1200 },
+    ],
+  };
+
+  const pink = '#ec4899';
+  for (const mode of ['name', 'both', 'index'] as const) {
+    drawWaypointPinsOnCanvas(
+      makeTrackedCtx() as any,
+      1920,
+      1080,
+      mockMap,
+      { width: 1920, height: 1080 } as any,
+      0,
+      0,
+      1920,
+      1080,
+      mockRoute as any,
+      { ...DEFAULT_WAYPOINT_PIN_SETTINGS, displayMode: mode, showElevation: true, approachReveal: true },
+      pink,
+      0.5 // exact arrival at 5km / 10km so arrival styling is exercised too
+    );
+  }
+
+  assert.ok(usedColors.some((c) => c.toLowerCase() === pink || c.includes('236, 72, 153')));
+  assert.equal(
+    usedColors.some((c) => c.toLowerCase().includes('#fbbf24') || c.toLowerCase().includes('#f59e0b') || c.includes('245, 158, 11') || c.includes('251, 191, 36')),
+    false
+  );
+});
+
 
 

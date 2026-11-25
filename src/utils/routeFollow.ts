@@ -182,6 +182,98 @@ export function getRoutePointAtProgress(
   };
 }
 
+export interface ProgressLineGeoJson {
+  type: 'Feature' | 'FeatureCollection';
+  properties?: Record<string, unknown>;
+  geometry?: {
+    type: 'LineString';
+    coordinates: [number, number][];
+  };
+  features?: never[];
+}
+
+/**
+ * Builds a GeoJSON LineString sliced to exact route progress (0..1) using cumulative distance (distFromStartKm).
+ * Its tip coordinate is guaranteed to match getRoutePointAtProgress(routeData, progressRatio) identically,
+ * keeping the drawn progress path 100% synchronized with the traveler beacon, camera, HUD, and video timeline
+ * regardless of waypoint count or spacing.
+ */
+export function buildProgressRouteGeoJson(
+  routeData: Pick<GpxRouteData, 'points' | 'coordinates' | 'totalDistanceKm'> | null | undefined,
+  progressRatio: number
+): ProgressLineGeoJson {
+  const empty: ProgressLineGeoJson = { type: 'FeatureCollection', features: [] };
+  if (!routeData) return empty;
+
+  const clampedProgress = Math.max(0, Math.min(1, Number.isFinite(progressRatio) ? progressRatio : 0));
+  if (clampedProgress <= 0) {
+    return empty;
+  }
+
+  const points = routeData.points;
+  if (!points || points.length < 2) {
+    const coords = routeData.coordinates || [];
+    if (coords.length < 2) return empty;
+    if (clampedProgress >= 1) {
+      return {
+        type: 'Feature',
+        properties: {},
+        geometry: { type: 'LineString', coordinates: coords },
+      };
+    }
+    const exactIdx = clampedProgress * (coords.length - 1);
+    const segIdx = Math.min(coords.length - 2, Math.floor(exactIdx));
+    const frac = exactIdx - segIdx;
+    const p1 = coords[segIdx];
+    const p2 = coords[segIdx + 1];
+    const sliced: [number, number][] = coords.slice(0, segIdx + 1);
+    sliced.push([p1[0] + frac * (p2[0] - p1[0]), p1[1] + frac * (p2[1] - p1[1])]);
+    return {
+      type: 'Feature',
+      properties: {},
+      geometry: { type: 'LineString', coordinates: sliced },
+    };
+  }
+
+  if (clampedProgress >= 1) {
+    const fullCoords: [number, number][] = points.map((pt) => [pt.lng, pt.lat]);
+    return {
+      type: 'Feature',
+      properties: {},
+      geometry: { type: 'LineString', coordinates: fullCoords },
+    };
+  }
+
+  const totalDist = Math.max(0.001, routeData.totalDistanceKm || points[points.length - 1].distFromStartKm || 1);
+  const targetDist = clampedProgress * totalDist;
+  const segIdx = findSegmentIndex(points, targetDist);
+
+  const p1 = points[segIdx];
+  const p2 = points[segIdx + 1];
+  const d1 = p1.distFromStartKm ?? 0;
+  const d2 = p2.distFromStartKm ?? d1;
+  const segLen = d2 - d1;
+  const frac = segLen > 0 ? Math.max(0, Math.min(1, (targetDist - d1) / segLen)) : 0;
+
+  const curLng = p1.lng + frac * (p2.lng - p1.lng);
+  const curLat = p1.lat + frac * (p2.lat - p1.lat);
+
+  const coordinates: [number, number][] = [];
+  for (let i = 0; i <= segIdx; i++) {
+    coordinates.push([points[i].lng, points[i].lat]);
+  }
+  coordinates.push([curLng, curLat]);
+
+  return {
+    type: 'Feature',
+    properties: {},
+    geometry: {
+      type: 'LineString',
+      coordinates,
+    },
+  };
+}
+
 /**
  * Interpolates (lng, lat) along track points at a given cumulative distance in km
  */

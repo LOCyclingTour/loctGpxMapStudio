@@ -461,8 +461,6 @@ export const VideoExportModal: React.FC<VideoExportModalProps> = ({
       mediaRecorder.start(500);
     }
 
-    const numWaypoints = Math.max(2, routeData.waypoints.length);
-    const totalSegments = numWaypoints - 1;
     const autoSubtitle = `${routeData.totalDistanceKm} KM (${routeData.totalDistanceMiles} MI) • +${routeData.elevationGainM}M ELEVATION`;
 
     const startCoord = routeData.coordinates[0];
@@ -525,10 +523,10 @@ export const VideoExportModal: React.FC<VideoExportModalProps> = ({
         let currentTimeline: ReturnType<typeof getTimelineState> | null = null;
 
         if (!hasIntroOrOutro) {
-          effectiveRouteProgress = frameIdx / totalCalculatedFrames;
-          const currentSegment = Math.min(totalSegments - 1, Math.floor(effectiveRouteProgress * totalSegments));
-          const segmentProgress = (effectiveRouteProgress * totalSegments) % 1;
-          handle.updateProgress(currentSegment, segmentProgress, effectiveRouteProgress, false);
+          effectiveRouteProgress = totalCalculatedFrames > 1
+            ? frameIdx / (totalCalculatedFrames - 1)
+            : 1;
+          handle.updateProgress(0, effectiveRouteProgress, effectiveRouteProgress, false);
           
           if (handle.moveCameraToProgress) {
             const isFirstFrame = frameIdx === 0;
@@ -563,9 +561,7 @@ export const VideoExportModal: React.FC<VideoExportModalProps> = ({
             handle.updateProgress(0, 0, 0, false);
           } else if (timeline.phase === 'flythrough') {
             handle.setLineColorOverride?.(null);
-            const currentSegment = Math.min(totalSegments - 1, Math.floor(timeline.routeProgress * totalSegments));
-            const segmentProgress = (timeline.routeProgress * totalSegments) % 1;
-            handle.updateProgress(currentSegment, segmentProgress, timeline.routeProgress, false);
+            handle.updateProgress(0, timeline.routeProgress, timeline.routeProgress, false);
 
             if (handle.moveCameraToProgress) {
               const isFirstFlyFrame = timeline.phaseProgress < (1 / (durationSeconds * fps) * 2);
@@ -608,7 +604,7 @@ export const VideoExportModal: React.FC<VideoExportModalProps> = ({
             if (map) {
               map.jumpTo(cam);
             }
-            handle.updateProgress(totalSegments - 1, 1, 1, false);
+            handle.updateProgress(0, 1, 1, false);
           } else if (timeline.phase === 'outro-hold' || timeline.phase === 'ended') {
             statusBadgeText = '🏁 ROUTE COMPLETE';
             const overviewPitch = is3dTerrain ? 38 : 0;
@@ -620,7 +616,7 @@ export const VideoExportModal: React.FC<VideoExportModalProps> = ({
                 pitch: overviewPitch,
               });
             }
-            handle.updateProgress(totalSegments - 1, 1, 1, false);
+            handle.updateProgress(0, 1, 1, false);
             if (timeline.animatedLineColor) {
               handle.setLineColorOverride?.(timeline.animatedLineColor, timeline.lineWidthBonus);
             }

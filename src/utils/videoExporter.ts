@@ -833,6 +833,33 @@ export function isPointInFrontOfCamera(
 }
 
 /**
+ * Converts a hex (#rgb / #rrggbb) or rgb(...) color string into an rgba() string with the requested opacity.
+ */
+export function colorWithAlpha(color: string, alpha: number): string {
+  const clamped = Math.max(0, Math.min(1, alpha));
+  if (!color || typeof color !== 'string') {
+    return `rgba(245, 158, 11, ${clamped})`;
+  }
+  const trimmed = color.trim();
+  const hexMatch = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(trimmed);
+  if (hexMatch) {
+    let hex = hexMatch[1];
+    if (hex.length === 3) {
+      hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
+    }
+    const r = parseInt(hex.slice(0, 2), 16);
+    const g = parseInt(hex.slice(2, 4), 16);
+    const b = parseInt(hex.slice(4, 6), 16);
+    return `rgba(${r}, ${g}, ${b}, ${clamped})`;
+  }
+  const rgbMatch = /^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i.exec(trimmed);
+  if (rgbMatch) {
+    return `rgba(${rgbMatch[1]}, ${rgbMatch[2]}, ${rgbMatch[3]}, ${clamped})`;
+  }
+  return trimmed;
+}
+
+/**
  * Renders all active route waypoint pins (Name badges, Index pins, Callouts, Ground markers, and Arrival pulses)
  * directly onto the composite video export canvas at full export resolution.
  */
@@ -923,20 +950,20 @@ export function drawWaypointPinsOnCanvas(
 
     ctx.save();
 
-    const activeColor = isActiveArrival ? '#fbbf24' : accentColor;
+    const activeColor = accentColor || '#f59e0b';
     const imgEl = wpt.imageUrl && imageCache ? imageCache.get(wpt.imageUrl) : null;
     const hasPhotoLoaded = Boolean(imgEl && imgEl.complete && imgEl.naturalWidth > 0);
 
     // Ground arrival pulse rings
     if (isActiveArrival) {
       ctx.save();
-      ctx.strokeStyle = '#fbbf24';
+      ctx.strokeStyle = activeColor;
       ctx.lineWidth = Math.max(1.5, 2.5 * scale);
       ctx.beginPath();
       ctx.arc(targetX, targetY, 14 * scale, 0, Math.PI * 2);
       ctx.stroke();
 
-      ctx.strokeStyle = 'rgba(251, 191, 36, 0.45)';
+      ctx.strokeStyle = colorWithAlpha(activeColor, 0.45);
       ctx.lineWidth = Math.max(1, 1.8 * scale);
       ctx.beginPath();
       ctx.arc(targetX, targetY, 24 * scale, 0, Math.PI * 2);
@@ -989,7 +1016,7 @@ export function drawWaypointPinsOnCanvas(
       const pillTop = targetY - arrowH - pillHeight - 4 * scale;
 
       // Drop shadow and glow
-      ctx.shadowColor = isActiveArrival ? 'rgba(251, 191, 36, 0.55)' : 'rgba(0, 0, 0, 0.7)';
+      ctx.shadowColor = isActiveArrival ? colorWithAlpha(activeColor, 0.6) : 'rgba(0, 0, 0, 0.7)';
       ctx.shadowBlur = (isActiveArrival ? 14 : 10) * scale;
       ctx.shadowOffsetY = 3 * scale;
 
@@ -1068,8 +1095,8 @@ export function drawWaypointPinsOnCanvas(
         const eleW = eleWidth;
         const eleR = eleH / 2;
 
-        ctx.fillStyle = 'rgba(245, 158, 11, 0.2)';
-        ctx.strokeStyle = 'rgba(245, 158, 11, 0.45)';
+        ctx.fillStyle = colorWithAlpha(activeColor, 0.22);
+        ctx.strokeStyle = colorWithAlpha(activeColor, 0.5);
         ctx.lineWidth = 1 * scale;
         ctx.beginPath();
         ctx.moveTo(eleX + eleR, eleY);
@@ -1082,7 +1109,7 @@ export function drawWaypointPinsOnCanvas(
         ctx.stroke();
 
         ctx.font = `bold ${eleFontSize}px ui-monospace, SFMono-Regular, Menlo, monospace`;
-        ctx.fillStyle = '#fbbf24';
+        ctx.fillStyle = activeColor;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(eleText, eleX + eleW / 2, eleY + eleH / 2);
@@ -1109,7 +1136,7 @@ export function drawWaypointPinsOnCanvas(
 
       // Callout box
       ctx.fillStyle = 'rgba(10, 10, 10, 0.92)';
-      ctx.strokeStyle = 'rgba(245, 158, 11, 0.7)';
+      ctx.strokeStyle = colorWithAlpha(activeColor, 0.75);
       ctx.lineWidth = 1 * scale;
       ctx.shadowColor = 'rgba(0, 0, 0, 0.6)';
       ctx.shadowBlur = 8 * scale;
@@ -1175,7 +1202,7 @@ export function drawWaypointPinsOnCanvas(
         const arrowH = 6 * scale;
         const pinCenterY = targetY - arrowH - pinRadius - 3 * scale;
 
-        ctx.shadowColor = isActiveArrival ? 'rgba(251, 191, 36, 0.5)' : 'rgba(0, 0, 0, 0.7)';
+        ctx.shadowColor = isActiveArrival ? colorWithAlpha(activeColor, 0.55) : 'rgba(0, 0, 0, 0.7)';
         ctx.shadowBlur = 10 * scale;
 
         ctx.fillStyle = '#0a0a0a';

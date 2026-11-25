@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { GpxRouteData, GpxWaypoint } from '../utils/gpxParser';
 import { SAMPLE_ROUTES, SampleRoute } from '../data/sampleRoutes';
 import { LineStyleSettings, CameraSettings } from './MapViewer';
@@ -103,6 +103,129 @@ const PRESET_COLORS = [
   { label: 'Ultra Violet', hex: '#a855f7' },
   { label: 'Pure White', hex: '#ffffff' },
 ];
+
+interface NumericFieldInputProps {
+  id: string;
+  value: number;
+  min: number;
+  max: number;
+  step?: number;
+  decimals?: number;
+  unit?: string;
+  ariaLabel: string;
+  accent?: 'amber' | 'cyan';
+  widthClass?: string;
+  wrapModulo?: number;
+  onChange: (value: number) => void;
+}
+
+const NumericFieldInput: React.FC<NumericFieldInputProps> = ({
+  id,
+  value,
+  min,
+  max,
+  step = 1,
+  decimals = 0,
+  unit,
+  ariaLabel,
+  accent = 'amber',
+  widthClass = 'w-12',
+  wrapModulo,
+  onChange,
+}) => {
+  const formatVal = (v: number) => (decimals > 0 ? v.toFixed(decimals) : String(Math.round(v)));
+  const [draft, setDraft] = useState<string>(() => formatVal(value));
+  const [isFocused, setIsFocused] = useState(false);
+
+  useEffect(() => {
+    if (!isFocused) {
+      setDraft(formatVal(value));
+    }
+  }, [value, isFocused, decimals]);
+
+  const normalizeValue = (raw: number): number => {
+    let next = raw;
+    if (wrapModulo && wrapModulo > 0) {
+      next = ((next % wrapModulo) + wrapModulo) % wrapModulo;
+    }
+    next = Math.max(min, Math.min(max, next));
+    if (decimals > 0) {
+      const factor = Math.pow(10, decimals);
+      return Math.round(next * factor) / factor;
+    }
+    return Math.round(next);
+  };
+
+  const commitDraft = () => {
+    const parsed = parseFloat(draft);
+    if (Number.isFinite(parsed)) {
+      const normalized = normalizeValue(parsed);
+      onChange(normalized);
+      setDraft(formatVal(normalized));
+    } else {
+      setDraft(formatVal(value));
+    }
+  };
+
+  const focusBorderClass =
+    accent === 'cyan'
+      ? 'focus-within:border-cyan-400 focus-within:ring-1 focus-within:ring-cyan-400/30'
+      : 'focus-within:border-amber-400 focus-within:ring-1 focus-within:ring-amber-400/30';
+
+  const valueTextClass = accent === 'cyan' ? 'text-cyan-300' : 'text-amber-300';
+
+  return (
+    <div
+      className={`inline-flex items-center gap-1 rounded-md bg-neutral-950/90 border border-neutral-700/90 px-2 py-0.5 transition-colors ${focusBorderClass}`}
+    >
+      <input
+        id={id}
+        type="number"
+        min={wrapModulo ? undefined : min}
+        max={wrapModulo ? undefined : max}
+        step={step}
+        value={draft}
+        aria-label={ariaLabel}
+        onFocus={(e) => {
+          setIsFocused(true);
+          e.currentTarget.select();
+        }}
+        onChange={(e) => {
+          const rawStr = e.target.value;
+          setDraft(rawStr);
+          const parsed = parseFloat(rawStr);
+          if (Number.isFinite(parsed)) {
+            if (wrapModulo && wrapModulo > 0) {
+              onChange(normalizeValue(parsed));
+            } else if (parsed >= min && parsed <= max) {
+              onChange(normalizeValue(parsed));
+            }
+          }
+        }}
+        onBlur={() => {
+          setIsFocused(false);
+          commitDraft();
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            commitDraft();
+            e.currentTarget.blur();
+          } else if (e.key === 'Escape') {
+            setDraft(formatVal(value));
+            setIsFocused(false);
+            e.currentTarget.blur();
+          }
+        }}
+        className={`${widthClass} bg-transparent text-right font-mono text-xs font-bold ${valueTextClass} focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none`}
+      />
+      {unit && (
+        <span className="font-mono text-[10px] font-semibold text-neutral-400 select-none">
+          {unit}
+        </span>
+      )}
+    </div>
+  );
+};
 
 export const RouteControlsDrawer: React.FC<RouteControlsDrawerProps> = ({
   routeData,
@@ -669,15 +792,28 @@ export const RouteControlsDrawer: React.FC<RouteControlsDrawerProps> = ({
                 {cameraSettings.is3dTerrain && (
                   <div className="pt-2 border-t border-neutral-800/80 space-y-1.5">
                     <div className="flex justify-between items-center text-[10px] font-mono">
-                      <span className="text-neutral-400 uppercase">VERTICAL EXAGGERATION:</span>
-                      <span className="font-bold text-amber-400">{cameraSettings.terrainExaggeration.toFixed(1)}x</span>
+                      <label htmlFor="terrain-exaggeration-input" className="text-neutral-400 uppercase">
+                        VERTICAL EXAGGERATION:
+                      </label>
+                      <NumericFieldInput
+                        id="terrain-exaggeration-input"
+                        value={cameraSettings.terrainExaggeration}
+                        min={0.1}
+                        max={5.0}
+                        step={0.1}
+                        decimals={1}
+                        unit="x"
+                        widthClass="w-10"
+                        ariaLabel="Vertical exaggeration value"
+                        onChange={(val) => onCameraChange({ terrainExaggeration: val })}
+                      />
                     </div>
                     <input
                       type="range"
                       min="0.5"
                       max="3.0"
                       step="0.1"
-                      value={cameraSettings.terrainExaggeration}
+                      value={Math.max(0.5, Math.min(3.0, cameraSettings.terrainExaggeration))}
                       onChange={(e) => onCameraChange({ terrainExaggeration: parseFloat(e.target.value) })}
                       aria-label="Terrain elevation exaggeration"
                       className="w-full h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-amber-400"
@@ -686,19 +822,38 @@ export const RouteControlsDrawer: React.FC<RouteControlsDrawerProps> = ({
                 )}
               </div>
 
-              {/* CAMERA HEIGHT (ALTITUDE) SLIDER */}
+              {/* CAMERA HEIGHT (ALTITUDE) SLIDER & INPUT */}
               <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-1.5">
-                    <Eye className="w-3.5 h-3.5 text-cyan-400" />
-                    <label htmlFor="cam-height-slider" className="font-mono uppercase font-bold text-[11px] tracking-wider text-neutral-300">
-                      CAMERA HEIGHT (ALTITUDE)
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <Eye className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                    <label htmlFor="cam-height-input" className="font-mono uppercase font-bold text-[11px] tracking-wider text-neutral-300 truncate">
+                      CAMERA HEIGHT
                     </label>
                   </div>
-                  <div className="font-mono text-xs text-right">
-                    <span className="font-bold text-cyan-400">{formattedAlt.metric}</span>
-                    <span className="text-neutral-400 text-[10px] ml-1">({formattedAlt.imperial})</span>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <NumericFieldInput
+                      id="cam-height-input"
+                      value={cameraSettings.altitudeMeters}
+                      min={50}
+                      max={200000}
+                      step={100}
+                      decimals={0}
+                      unit="m"
+                      accent="cyan"
+                      widthClass="w-16"
+                      ariaLabel="Camera height altitude in meters input"
+                      onChange={(val) => {
+                        onSetCameraAltitude(val);
+                        onCameraChange({ altitudeMeters: val });
+                      }}
+                    />
                   </div>
+                </div>
+
+                <div className="flex items-center justify-end text-[10px] font-mono text-neutral-400 -mt-1">
+                  <span className="text-cyan-400/90 font-semibold">{formattedAlt.metric}</span>
+                  <span className="ml-1">({formattedAlt.imperial})</span>
                 </div>
 
                 {/* Logarithmic-style slider mapping 200m to 30,000m */}
@@ -708,7 +863,7 @@ export const RouteControlsDrawer: React.FC<RouteControlsDrawerProps> = ({
                   min="200"
                   max="30000"
                   step="100"
-                  value={cameraSettings.altitudeMeters}
+                  value={Math.max(200, Math.min(30000, cameraSettings.altitudeMeters))}
                   onChange={(e) => {
                     const val = parseInt(e.target.value);
                     onSetCameraAltitude(val);
@@ -728,18 +883,32 @@ export const RouteControlsDrawer: React.FC<RouteControlsDrawerProps> = ({
 
               {/* CAMERA PITCH (TILT) */}
               <div className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <span className="font-mono uppercase font-bold text-[11px] tracking-wider text-neutral-300">
+                <div className="flex items-center justify-between gap-2">
+                  <label htmlFor="cam-pitch-input" className="font-mono uppercase font-bold text-[11px] tracking-wider text-neutral-300">
                     CAMERA PITCH / TILT
-                  </span>
-                  <span className="font-mono text-xs font-bold text-white">{cameraSettings.pitch}°</span>
+                  </label>
+                  <NumericFieldInput
+                    id="cam-pitch-input"
+                    value={cameraSettings.pitch}
+                    min={0}
+                    max={85}
+                    step={1}
+                    decimals={0}
+                    unit="°"
+                    widthClass="w-10"
+                    ariaLabel="Camera pitch tilt angle in degrees input"
+                    onChange={(val) => {
+                      onSetCameraPitch(val);
+                      onCameraChange({ pitch: val });
+                    }}
+                  />
                 </div>
                 <input
                   type="range"
                   min="0"
                   max="80"
                   step="1"
-                  value={cameraSettings.pitch}
+                  value={Math.max(0, Math.min(80, cameraSettings.pitch))}
                   onChange={(e) => {
                     const val = parseInt(e.target.value);
                     onSetCameraPitch(val);
@@ -757,22 +926,34 @@ export const RouteControlsDrawer: React.FC<RouteControlsDrawerProps> = ({
 
               {/* CAMERA BEARING (ROTATION / HEADING) */}
               <div className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 min-w-0">
                     <Navigation 
-                      className="w-3.5 h-3.5 text-amber-400 transition-transform" 
+                      className="w-3.5 h-3.5 text-amber-400 transition-transform shrink-0" 
                       style={{ transform: `rotate(${-cameraSettings.bearing}deg)` }} 
                     />
-                    <span className="font-mono uppercase font-bold text-[11px] tracking-wider text-neutral-300">
+                    <label htmlFor="cam-bearing-input" className="font-mono uppercase font-bold text-[11px] tracking-wider text-neutral-300 truncate">
                       BEARING / HEADING
-                    </span>
+                    </label>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono text-xs font-bold text-white">{cameraSettings.bearing}°</span>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <NumericFieldInput
+                      id="cam-bearing-input"
+                      value={cameraSettings.bearing}
+                      min={0}
+                      max={359}
+                      step={1}
+                      decimals={0}
+                      unit="°"
+                      widthClass="w-11"
+                      wrapModulo={360}
+                      ariaLabel="Camera bearing heading in degrees input"
+                      onChange={(val) => onSetCameraBearing(val)}
+                    />
                     <button
                       onClick={() => onSetCameraBearing(0)}
                       title="Reset North"
-                      className="px-1.5 py-0.5 rounded text-[9px] font-mono uppercase bg-neutral-800 hover:bg-neutral-700 text-neutral-300 hover:text-white"
+                      className="px-1.5 py-1 rounded text-[9px] font-mono uppercase bg-neutral-800 hover:bg-neutral-700 text-neutral-300 hover:text-white cursor-pointer"
                     >
                       Reset N
                     </button>
@@ -783,7 +964,7 @@ export const RouteControlsDrawer: React.FC<RouteControlsDrawerProps> = ({
                   min="0"
                   max="359"
                   step="1"
-                  value={cameraSettings.bearing}
+                  value={((Math.round(cameraSettings.bearing) % 360) + 360) % 360}
                   onChange={(e) => onSetCameraBearing(parseInt(e.target.value))}
                   aria-label="Camera bearing rotation heading in degrees"
                   className="w-full h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-amber-400"

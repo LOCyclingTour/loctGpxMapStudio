@@ -35,8 +35,8 @@
 /* Arrival highlight pulse when route reaches the waypoint */
 .custom-wpt-marker-wrap.is-active-arrival .wpt-badge-pill,
 .custom-wpt-marker-wrap.is-active-arrival .pin-inner {
-  border-color: #fbbf24 !important;
-  box-shadow: 0 0 0 4px rgba(251, 191, 36, 0.4), 0 8px 24px rgba(0, 0, 0, 0.7) !important;
+  border-color: var(--wpt-accent-color, #f59e0b) !important;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--wpt-accent-color, #f59e0b) 45%, transparent), 0 8px 24px rgba(0, 0, 0, 0.7) !important;
   animation: arrival-bounce 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275);
 }
 
@@ -80,14 +80,14 @@
   align-items: center;
   gap: 6px;
   background: rgba(13, 15, 20, 0.94);
-  border: 1.5px solid #f59e0b;
+  border: 1.5px solid var(--wpt-accent-color, #f59e0b);
   border-radius: 9999px;
   padding: 0.35em 0.85em;
   font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
   font-size: var(--wpt-font-size, 12px);
   font-weight: 700;
   color: #f9fafb;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.7), 0 0 12px rgba(245, 158, 11, 0.25);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.7), 0 0 12px color-mix(in srgb, var(--wpt-accent-color, #f59e0b) 28%, transparent);
   backdrop-filter: blur(8px);
   white-space: nowrap;
   max-width: max(260px, calc(var(--wpt-font-size, 12px) * 22));
@@ -97,14 +97,14 @@
 
 .wpt-badge-pill:hover {
   transform: translateY(-2px) scale(1.04);
-  border-color: #fcd34d;
+  border-color: color-mix(in srgb, var(--wpt-accent-color, #f59e0b) 80%, #ffffff);
 }
 
 .wpt-badge-pill .wpt-pill-icon {
   width: max(14px, 1.1em);
   height: max(14px, 1.1em);
   flex-shrink: 0;
-  color: #f59e0b;
+  color: var(--wpt-accent-color, #f59e0b);
 }
 
 .wpt-badge-pill .wpt-pill-name {
@@ -118,12 +118,12 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: var(--wpt-ele-font-size, 10px);
   font-weight: 600;
-  color: #fbbf24;
-  background: rgba(245, 158, 11, 0.16);
+  color: color-mix(in srgb, var(--wpt-accent-color, #f59e0b) 82%, #ffffff);
+  background: color-mix(in srgb, var(--wpt-accent-color, #f59e0b) 18%, transparent);
   padding: 1px 5px;
   border-radius: 9999px;
   margin-left: 2px;
-  border: 1px solid rgba(245, 158, 11, 0.3);
+  border: 1px solid color-mix(in srgb, var(--wpt-accent-color, #f59e0b) 38%, transparent);
 }
 
 .wpt-badge-pill .wpt-pill-idx {
@@ -137,7 +137,7 @@
 /* Callout Label above Classic Pin */
 .wpt-name-callout {
   background: rgba(10, 10, 10, 0.92);
-  border: 1px solid rgba(245, 158, 11, 0.6);
+  border: 1px solid color-mix(in srgb, var(--wpt-accent-color, #f59e0b) 65%, transparent);
   border-radius: 6px;
   padding: 0.2em 0.65em;
   font-size: var(--wpt-font-size, 11px);
@@ -175,11 +175,11 @@
   height: max(32px, calc(var(--wpt-index-font-size, 11px) * 2.3));
   border-radius: 9999px;
   background-color: #0a0a0a;
-  border: 2.5px solid #f59e0b;
+  border: 2.5px solid var(--wpt-accent-color, #f59e0b);
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.6), 0 0 12px rgba(245, 158, 11, 0.3);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.6), 0 0 12px color-mix(in srgb, var(--wpt-accent-color, #f59e0b) 32%, transparent);
   overflow: hidden;
   z-index: 2;
   transition: border-color 0.2s, box-shadow 0.2s;
@@ -190,9 +190,9 @@
   width: 14px;
   height: 14px;
   border-width: 2px;
-  border-color: #f59e0b;
+  border-color: var(--wpt-accent-color, #f59e0b);
   background: #ffffff;
-  box-shadow: 0 0 8px rgba(245, 158, 11, 0.7);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--wpt-accent-color, #f59e0b) 70%, transparent);
 }
 
 .custom-wpt-pin.has-photo .pin-inner {
@@ -224,22 +224,22 @@
   z-index: 1;
 }
 
-.custom-wpt-pin .pin-arrow {
+.custom-wpt-marker-wrap .pin-arrow {
   width: 0;
   height: 0;
   border-left: 6px solid transparent;
   border-right: 6px solid transparent;
-  border-top: 7px solid #f59e0b;
+  border-top: 7px solid var(--wpt-accent-color, #f59e0b);
   margin-top: -1px;
   z-index: 2;
   filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.5));
 }
 
-.custom-wpt-pin .pin-ground-dot {
+.custom-wpt-marker-wrap .pin-ground-dot {
   width: 4px;
   height: 4px;
   border-radius: 9999px;
-  background-color: #f59e0b;
+  background-color: var(--wpt-accent-color, #f59e0b);
   border: 1px solid rgba(255, 255, 255, 0.95);
   box-shadow: 0 0 4px rgba(0, 0, 0, 0.8);
   margin-top: -2px;

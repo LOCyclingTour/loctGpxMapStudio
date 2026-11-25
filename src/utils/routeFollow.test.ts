@@ -7,6 +7,7 @@ import {
   getRoutePointAtProgress,
   getCalmRouteTarget,
   stepCalmBearing,
+  buildProgressRouteGeoJson,
   findNearestElevation,
 } from './routeFollow.ts';
 
@@ -152,5 +153,54 @@ test('stepCalmBearing ignores small deviations inside deadband and caps rotation
   const wrapped = stepCalmBearing(1, 270);
   assert.ok(wrapped >= 0.71 && wrapped < 1);
 });
+
+test('buildProgressRouteGeoJson matches getRoutePointAtProgress exactly regardless of waypoint spacing', () => {
+  const unevenRoute = {
+    points: [
+      { lat: 47.0, lng: 12.0, ele: 1000, distFromStartKm: 0 },
+      { lat: 47.0, lng: 12.2, ele: 1200, distFromStartKm: 2 },
+      { lat: 47.0, lng: 12.6, ele: 1500, distFromStartKm: 10 },
+      { lat: 47.2, lng: 12.6, ele: 2000, distFromStartKm: 20 },
+    ],
+    coordinates: [
+      [12.0, 47.0],
+      [12.2, 47.0],
+      [12.6, 47.0],
+      [12.6, 47.2],
+    ] as [number, number][],
+    totalDistanceKm: 20,
+    waypoints: [
+      // Unevenly clustered waypoints near start
+      { id: 'w1', name: 'Start', lat: 47.0, lng: 12.0 },
+      { id: 'w2', name: 'Early WP', lat: 47.0, lng: 12.2 },
+      { id: 'w3', name: 'Finish', lat: 47.2, lng: 12.6 },
+    ],
+  };
+
+  // At progress 0 -> empty feature collection
+  const g0 = buildProgressRouteGeoJson(unevenRoute, 0);
+  assert.equal(g0.type, 'FeatureCollection');
+  assert.equal(g0.features?.length, 0);
+
+  // At intermediate progress -> exact Feature LineString matching getRoutePointAtProgress
+  for (const p of [0.1, 0.3, 0.5, 0.75]) {
+    const g = buildProgressRouteGeoJson(unevenRoute, p);
+    assert.equal(g.type, 'Feature');
+    assert.ok(g.geometry);
+    const coords = g.geometry.coordinates;
+    const tip = coords[coords.length - 1];
+    const expected = getRoutePointAtProgress(unevenRoute, p);
+    assert.ok(Math.abs(tip[0] - expected.lng) < 1e-9);
+    assert.ok(Math.abs(tip[1] - expected.lat) < 1e-9);
+  }
+
+  // At progress 1 -> full coordinate array
+  const g1 = buildProgressRouteGeoJson(unevenRoute, 1);
+  assert.equal(g1.type, 'Feature');
+  assert.ok(g1.geometry);
+  assert.equal(g1.geometry.coordinates.length, unevenRoute.coordinates.length);
+  assert.deepEqual(g1.geometry.coordinates[3], [12.6, 47.2]);
+});
+
 
 
